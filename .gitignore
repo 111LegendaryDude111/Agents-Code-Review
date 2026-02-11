@@ -1,0 +1,69 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Test / coverage outputs
+.coverage
+coverage.xml
+htmlcov/
+
+# Project artifacts
+result.json
+artifacts/
+reports/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# IDE / OS files
+.DS_Store
+.idea/
+.vscode/
+
+# JS dependencies (if present)
+node_modules/
+
+# Heavy model/data/archive files
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.onnx
+*.safetensors
+*.gguf
+*.h5
+*.hdf5
+*.pkl
+*.joblib
+*.npy
+*.npz
+*.parquet
+*.feather
+*.arrow
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
