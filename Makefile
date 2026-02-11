@@ -1,4 +1,4 @@
-.PHONY: setup test run clean lint
+.PHONY: setup setup-dev test lint format run clean
 
 PYTHON := .venv/bin/python
 PIP := .venv/bin/pip
@@ -8,12 +8,19 @@ setup:
 	$(PIP) install --upgrade pip
 	$(PIP) install -e .
 
+setup-dev: setup
+	$(PIP) install -e ".[dev]"
+
 test:
 	PYTHONPATH=. $(PYTHON) tests/test_flow.py
 
 lint:
-	# Add linting commands here if needed, e.g., flake8, mypy
-	@echo "Linting not implemented yet."
+	$(PYTHON) -m ruff check src tests
+	$(PYTHON) -m black --check src tests
+
+format:
+	$(PYTHON) -m ruff check --fix src tests
+	$(PYTHON) -m black src tests
 
 clean:
 	rm -rf .venv

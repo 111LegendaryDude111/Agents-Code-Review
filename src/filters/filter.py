@@ -1,5 +1,6 @@
 import fnmatch
-from typing import List, Dict
+from dataclasses import dataclass
+
 from ..domain import ChangedFile
 
 DEFAULT_IGNORE_PATTERNS = [
@@ -14,7 +15,7 @@ DEFAULT_IGNORE_PATTERNS = [
     "node_modules/**",
     "vendor/**",
     "__pycache__/**",
-    "*.pyc"
+    "*.pyc",
 ]
 
 RISK_PATTERNS = {
@@ -22,48 +23,48 @@ RISK_PATTERNS = {
     "payment": ["**/payment/**", "**/billing/**", "**/stripe/**"],
     "core": ["**/core/**", "**/kernel/**", "**/infra/**"],
     "api": ["**/api/**", "**/routes/**", "**/controllers/**"],
-    "deps": ["package.json", "pyproject.toml", "go.mod", "requirements.txt"]
+    "deps": ["package.json", "pyproject.toml", "go.mod", "requirements.txt"],
 }
 
+
+@dataclass
 class FilterResult:
-    def __init__(self, files_to_review: List[ChangedFile], excluded_files: List[ChangedFile], risk_score: int, risk_factors: List[str]):
-        self.files_to_review = files_to_review
-        self.excluded_files = excluded_files
-        self.risk_score = risk_score
-        self.risk_factors = risk_factors
+    files_to_review: list[ChangedFile]
+    excluded_files: list[ChangedFile]
+    risk_score: int
+    risk_factors: list[str]
+
 
 class FileFilter:
-    def __init__(self, ignore_patterns: List[str] = None):
+    def __init__(self, ignore_patterns: list[str] | None = None):
         self.ignore_patterns = ignore_patterns or DEFAULT_IGNORE_PATTERNS
 
-    def filter_files(self, files: List[ChangedFile]) -> FilterResult:
-        to_review = []
-        excluded = []
-        risk_score = 0
-        risk_factors = set()
+    def filter_files(self, files: list[ChangedFile]) -> FilterResult:
+        to_review: list[ChangedFile] = []
+        excluded: list[ChangedFile] = []
+        risk_factors: set[str] = set()
 
         for file in files:
             if self._should_ignore(file.path):
-                file.is_generated = True # marking as generated/ignored
+                file.is_generated = True
                 excluded.append(file)
                 continue
-            
-            # Check for risk factors
+
             self._analyze_risk(file, risk_factors)
             to_review.append(file)
 
-        # Calculate final score based on factors
-        risk_score = len(risk_factors) * 10 # arbitrary weight
-        
-        return FilterResult(to_review, excluded, risk_score, list(risk_factors))
+        risk_score = len(risk_factors) * 10
+        return FilterResult(
+            files_to_review=to_review,
+            excluded_files=excluded,
+            risk_score=risk_score,
+            risk_factors=sorted(risk_factors),
+        )
 
     def _should_ignore(self, path: str) -> bool:
-        for pattern in self.ignore_patterns:
-            if fnmatch.fnmatch(path, pattern):
-                return True
-        return False
+        return any(fnmatch.fnmatch(path, pattern) for pattern in self.ignore_patterns)
 
-    def _analyze_risk(self, file: ChangedFile, factors: set):
+    def _analyze_risk(self, file: ChangedFile, factors: set[str]) -> None:
         for category, patterns in RISK_PATTERNS.items():
             for pattern in patterns:
                 if fnmatch.fnmatch(file.path, pattern):

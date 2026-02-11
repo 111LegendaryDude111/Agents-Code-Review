@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional
+
 from ..domain import ChangedFile, Issue
+
 
 class BaseProvider(ABC):
     @abstractmethod
@@ -9,7 +10,7 @@ class BaseProvider(ABC):
         pass
 
     @abstractmethod
-    def get_changed_files(self) -> List[ChangedFile]:
+    def get_changed_files(self) -> list[ChangedFile]:
         """Get list of changed files with diff hunks."""
         pass
 
@@ -19,6 +20,6 @@ class BaseProvider(ABC):
         pass
 
     @abstractmethod
-    def post_inline_comments(self, issues: List[Issue]) -> None:
+    def post_inline_comments(self, issues: list[Issue]) -> None:
         """Post inline comments on specific lines."""
         pass

@@ -15,8 +15,34 @@ dependencies = [
     "rich>=13.7.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "black>=24.8.0",
+    "ruff>=0.6.9",
+]
+
 [project.scripts]
 ai-review = "src.main:cli"
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+include = "\\.pyi?$"
+exclude = """
+/(
+    \\.venv
+  | build
+  | dist
+)/
+"""
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = ["E501"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

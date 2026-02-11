@@ -10,7 +10,7 @@ def load_env_file(path: str = ".env", override: bool = False) -> None:
         return
 
     try:
-        with open(path, "r", encoding="utf-8") as env_file:
+        with open(path, encoding="utf-8") as env_file:
             for raw_line in env_file:
                 line = raw_line.strip()
                 if not line or line.startswith("#") or "=" not in line:

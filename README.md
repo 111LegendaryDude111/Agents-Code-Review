@@ -75,6 +75,11 @@ cp .env.example .env
 make setup
 ```
 
+### Установка dev-инструментов (линтер + форматтер)
+```bash
+make setup-dev
+```
+
 ### Запуск локально
 ```bash
 make run
@@ -83,6 +88,12 @@ make run
 Переопределение значений при необходимости:
 ```bash
 make run REPO=owner/repo PR=123 TOKEN=ghp_... KEY=...
+```
+
+### Статические проверки и автоформатирование
+```bash
+make lint
+make format
 ```
 
 ## Безопасность и Надежность
