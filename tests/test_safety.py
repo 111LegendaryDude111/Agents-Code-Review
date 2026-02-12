@@ -1,6 +1,6 @@
 import unittest
 
-from src.safety.utils import SecretRedactor
+from src.safety.utils import SafeJSONParser, SecretRedactor
 
 
 class TestSecretRedactor(unittest.TestCase):
@@ -40,6 +40,13 @@ class TestSecretRedactor(unittest.TestCase):
         self.assertNotIn(openai_key, redacted)
         self.assertNotIn(gemini_key, redacted)
         self.assertIn("********", redacted)
+
+
+class TestSafeJSONParser(unittest.TestCase):
+    def test_cleans_trailing_fence_even_without_opening(self) -> None:
+        raw = '{"key":"value"}\n```'
+        cleaned = SafeJSONParser.clean_json_text(raw)
+        self.assertEqual(cleaned, '{"key":"value"}')
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import Any, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -24,6 +25,12 @@ class Category(str, Enum):
 class EvidenceType(str, Enum):
     DOC = "DOC"
     DIFF = "DIFF"
+
+
+class TriageBudget(str, Enum):
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
 
 
 class Evidence(BaseModel):
@@ -87,14 +94,14 @@ class ChangedFile(BaseModel):
 class TriagePlan(BaseModel):
     files_to_review: list[str] = Field(default_factory=list)
     focus_areas: list[str] = Field(default_factory=list)
-    budget: str = "normal"
+    budget: TriageBudget = TriageBudget.NORMAL
     summary: str | None = None
 
 
 class LLMIssueCandidate(BaseModel):
-    id: str = "unknown"
-    severity: str = "NIT"
-    category: str = "STYLE"
+    id: str = Field(default_factory=lambda: f"llm-{uuid4().hex[:12]}")
+    severity: Severity = Severity.NIT
+    category: Category = Category.STYLE
     title: str = "Issue"
     message: str = ""
     line_start: int = 1

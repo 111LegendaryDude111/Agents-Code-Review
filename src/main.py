@@ -2,12 +2,24 @@ import json
 
 import click
 
-from .domain import ReviewResult, Severity
+from .domain import Issue, ReviewResult, Severity
 from .providers.github_provider import GitHubProvider
 from .safety.env_loader import load_env_file
 
 # Load local environment variables before Click resolves envvar-based options.
 load_env_file(".env")
+
+
+def _print_llm_file_comments(issues: list[Issue]) -> None:
+    click.echo("")
+    click.echo("LLM comments:")
+    if not issues:
+        click.echo("No issues found.")
+        return
+
+    for issue in issues:
+        comment = f"[{issue.severity.value}] {issue.title}: {issue.message}"
+        click.echo(f"{issue.path} - {comment}")
 
 
 @click.group()
@@ -161,6 +173,8 @@ def review(
     with open("result.json", "w", encoding="utf-8") as f:
         f.write(renderer.to_json(result))
 
+    _print_llm_file_comments(result.issues)
+
     if not dry_run:
         git_provider.post_summary_comment(summary_md)
         inline_issues = result.issues[: policy.max_inline]
@@ -168,8 +182,6 @@ def review(
         click.echo("Posted comments.")
     else:
         click.echo("Dry run: Skipping comment posting.")
-        click.echo(summary_md)
-        click.echo(renderer.to_json(result))
 
 
 if __name__ == "__main__":

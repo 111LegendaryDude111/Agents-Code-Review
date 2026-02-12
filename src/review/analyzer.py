@@ -1,9 +1,9 @@
+import logging
 from typing import Any
 
 from pydantic import ValidationError
 
 from ..domain import (
-    Category,
     ChangedFile,
     Evidence,
     EvidenceType,
@@ -11,10 +11,13 @@ from ..domain import (
     Issue,
     LLMIssueCandidate,
     Severity,
+    TriageBudget,
     TriagePlan,
 )
 from ..filters.filter import FilterResult
 from .llm import LLMClient
+
+logger = logging.getLogger(__name__)
 
 
 class ReviewAnalyzer:
@@ -41,11 +44,13 @@ class ReviewAnalyzer:
                         matched_lines.append(raw_line[:200])
                     new_line += 1
                 elif prefix == "-":
+                    # Deletions are not present in new-file line space.
                     continue
 
         if matched_lines:
             return "\n".join(matched_lines)[:500]
 
+        # Fallback to first hunk snippet when exact target lines are unavailable.
         if file.hunks:
             fallback = "\n".join(file.hunks[0].lines[:5]).strip()
             if fallback:
@@ -77,25 +82,34 @@ class ReviewAnalyzer:
             excerpt=self._extract_diff_excerpt(file, line_start, line_end),
         )
 
-    def _parse_severity(self, value: Any) -> Severity:
-        if isinstance(value, Severity):
+    def _parse_budget(self, value: Any) -> TriageBudget:
+        if isinstance(value, TriageBudget):
             return value
         if isinstance(value, str):
-            try:
-                return Severity(value.upper())
-            except ValueError:
-                return Severity.NIT
-        return Severity.NIT
+            normalized = value.strip().lower()
+            for budget in TriageBudget:
+                if budget.value == normalized:
+                    return budget
+        return TriageBudget.NORMAL
 
-    def _parse_category(self, value: Any) -> Category:
-        if isinstance(value, Category):
-            return value
-        if isinstance(value, str):
-            try:
-                return Category(value.upper())
-            except ValueError:
-                return Category.STYLE
-        return Category.STYLE
+    def _coerce_triage_plan(self, data: Any) -> TriagePlan:
+        if not isinstance(data, dict):
+            return TriagePlan()
+
+        raw_files = data.get("files_to_review", [])
+        raw_focus = data.get("focus_areas", [])
+        raw_budget = data.get("budget", TriageBudget.NORMAL.value)
+        raw_summary = data.get("summary")
+        return TriagePlan(
+            files_to_review=[str(item) for item in raw_files]
+            if isinstance(raw_files, list)
+            else [],
+            focus_areas=[str(item) for item in raw_focus]
+            if isinstance(raw_focus, list)
+            else [],
+            budget=self._parse_budget(raw_budget),
+            summary=str(raw_summary) if raw_summary is not None else None,
+        )
 
     def triage(
         self, filter_result: FilterResult, pr_meta: dict[str, Any]
@@ -138,34 +152,14 @@ Changed Files:
             cleaned = SafeJSONParser.clean_json_text(response)
             try:
                 plan = TriagePlan.model_validate_json(cleaned)
-                return plan.model_dump()
+                return plan.model_dump(mode="json")
             except ValidationError as validation_error:
-                print(f"Triage schema validation failed: {validation_error}")
-                fallback_data = SafeJSONParser.parse(response)
-                if isinstance(fallback_data, dict):
-                    raw_files = fallback_data.get("files_to_review", [])
-                    raw_focus = fallback_data.get("focus_areas", [])
-                    raw_budget = fallback_data.get("budget", "normal")
-                    raw_summary = fallback_data.get("summary")
-
-                    plan = TriagePlan(
-                        files_to_review=(
-                            [str(item) for item in raw_files]
-                            if isinstance(raw_files, list)
-                            else []
-                        ),
-                        focus_areas=(
-                            [str(item) for item in raw_focus]
-                            if isinstance(raw_focus, list)
-                            else []
-                        ),
-                        budget=str(raw_budget),
-                        summary=str(raw_summary) if raw_summary is not None else None,
-                    )
-                    return plan.model_dump()
-                raise
+                logger.warning("Triage schema validation failed: %s", validation_error)
+                fallback_data = SafeJSONParser.parse(cleaned)
+                plan = self._coerce_triage_plan(fallback_data)
+                return plan.model_dump(mode="json")
         except Exception as e:
-            print(f"Triage failed (JSON error): {e}")
+            logger.warning("Triage failed (JSON error): %s", e)
             # Fallback: review all filtered files
             return {"files_to_review": [f.path for f in filter_result.files_to_review]}
 
@@ -231,14 +225,18 @@ Diff:
                 review_response = FocusedReviewResponse.model_validate_json(cleaned)
                 issue_candidates = review_response.issues
             except ValidationError as validation_error:
-                print(
-                    f"Focused schema validation failed for {file.path}: {validation_error}"
+                logger.warning(
+                    "Focused schema validation failed for %s: %s",
+                    file.path,
+                    validation_error,
                 )
                 try:
-                    data = SafeJSONParser.parse(response)
+                    data = SafeJSONParser.parse(cleaned)
                 except Exception:
-                    print(
-                        f"JSON Parse failed for {file.path}. Content: {response[:50]}..."
+                    logger.warning(
+                        "JSON Parse failed for %s. Content: %s...",
+                        file.path,
+                        response[:50],
                     )
                     return []
 
@@ -262,14 +260,12 @@ Diff:
                 evidence = self._build_issue_evidence(
                     file, docs_evidence, line_start, line_end
                 )
-                severity = self._parse_severity(candidate.severity)
-                category = self._parse_category(candidate.category)
 
                 issues.append(
                     Issue(
                         id=candidate.id,
-                        severity=severity,
-                        category=category,
+                        severity=candidate.severity,
+                        category=candidate.category,
                         title=candidate.title,
                         message=candidate.message,
                         path=file.path,
@@ -282,5 +278,5 @@ Diff:
                 )
             return issues
         except Exception as e:
-            print(f"Review failed for {file.path}: {e}")
+            logger.warning("Review failed for %s: %s", file.path, e)
             return []

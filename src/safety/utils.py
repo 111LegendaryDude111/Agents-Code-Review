@@ -22,9 +22,10 @@ class SecretRedactor:
         # Google/Gemini API keys.
         r"\b(AIza[0-9A-Za-z\-_]{35})\b",
     ]
+    COMPILED_PATTERNS = tuple(re.compile(pattern) for pattern in PATTERNS)
 
     def __init__(self):
-        self.compiled_patterns = [re.compile(p) for p in self.PATTERNS]
+        self.compiled_patterns = self.COMPILED_PATTERNS
 
     def redact(self, text: str) -> str:
         if not text:
@@ -57,17 +58,12 @@ class SafeJSONParser:
         """
         Return text cleaned from markdown code fences.
         """
-        cleaned = text.strip()
-
-        if cleaned.startswith("```"):
-            lines = cleaned.splitlines()
-            if lines and lines[0].strip().startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].strip().startswith("```"):
-                lines = lines[:-1]
-            cleaned = "\n".join(lines)
-
-        return cleaned
+        lines = text.strip().splitlines()
+        while lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        while lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        return "\n".join(lines).strip()
 
     @staticmethod
     def parse(text: str) -> dict[str, Any]:
