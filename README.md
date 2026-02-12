@@ -61,7 +61,7 @@
 
 ### Требования
 - Python 3.10+
-- API key для выбранного LLM-провайдера (Gemini/OpenAI)
+- API key для выбранного LLM-провайдера (Gemini/OpenAI) или локальный Ollama
 - GitHub Token
 
 ### Настройка окружения
@@ -80,15 +80,45 @@ make setup
 make setup-dev
 ```
 
-### Запуск локально
+### Запуск локально (Gemini/OpenAI/Ollama)
 ```bash
 make run
+```
+
+Полный вывод (summary + полный `result.json` в терминале):
+```bash
+make run-full
 ```
 
 Переопределение значений при необходимости:
 ```bash
 make run REPO=owner/repo PR=123 TOKEN=ghp_... KEY=...
 ```
+
+### Локальный запуск через Ollama (Mac-friendly)
+
+1. Установи и запусти Ollama:
+```bash
+brew install ollama
+ollama serve
+```
+
+2. Загрузи модель:
+```bash
+make ollama-pull
+```
+
+3. Запусти ревью:
+```bash
+make run-ollama REPO=owner/repo PR=123 TOKEN=ghp_...
+```
+
+4. Полный вывод:
+```bash
+make run-ollama-full REPO=owner/repo PR=123 TOKEN=ghp_...
+```
+
+Подробности: `ollama/README.md`.
 
 ### Статические проверки и автоформатирование
 ```bash

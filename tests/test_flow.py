@@ -100,6 +100,47 @@ class TestReviewFlow(unittest.TestCase):
         final = PolicyManager().apply_policy(issues)
         self.assertEqual(len(final), 1)
 
+    @patch("src.review.llm.LLMClient")
+    def test_review_handles_missing_line_numbers(self, MockLLM):
+        llm = MockLLM.return_value
+        llm.get_completion.return_value = json.dumps(
+            {
+                "issues": [
+                    {
+                        "id": "issue-no-lines",
+                        "severity": "IMPORTANT",
+                        "category": "BUG",
+                        "title": "Line numbers missing",
+                        "message": "Issue without explicit line numbers.",
+                        "confidence": 0.9,
+                    }
+                ]
+            }
+        )
+
+        analyzer = ReviewAnalyzer(llm)
+        file = ChangedFile(
+            path="src/logic.py",
+            status="modified",
+            additions=1,
+            deletions=0,
+            hunks=[
+                DiffHunk(
+                    header="@@ -1,2 +1,3 @@",
+                    lines=[" line1", "+line2_new", " line3"],
+                    old_start=1,
+                    new_start=1,
+                    old_lines=2,
+                    new_lines=3,
+                )
+            ],
+        )
+
+        issues = analyzer.review_file(file, docs_evidence=[])
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].line_start, 2)
+        self.assertEqual(issues[0].line_end, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
