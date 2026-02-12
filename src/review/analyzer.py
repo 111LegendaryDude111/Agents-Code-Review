@@ -1,6 +1,18 @@
 from typing import Any
 
-from ..domain import Category, ChangedFile, Evidence, EvidenceType, Issue, Severity
+from pydantic import ValidationError
+
+from ..domain import (
+    Category,
+    ChangedFile,
+    Evidence,
+    EvidenceType,
+    FocusedReviewResponse,
+    Issue,
+    LLMIssueCandidate,
+    Severity,
+    TriagePlan,
+)
 from ..filters.filter import FilterResult
 from .llm import LLMClient
 
@@ -29,13 +41,11 @@ class ReviewAnalyzer:
                         matched_lines.append(raw_line[:200])
                     new_line += 1
                 elif prefix == "-":
-                    # Deletions are not present in the new-file line space.
                     continue
 
         if matched_lines:
             return "\n".join(matched_lines)[:500]
 
-        # Fallback: take the first few lines from the first available hunk.
         if file.hunks:
             fallback = "\n".join(file.hunks[0].lines[:5]).strip()
             if fallback:
@@ -125,7 +135,35 @@ Changed Files:
                 user_prompt,
                 response_format={"type": "json_object"},
             )
-            return SafeJSONParser.parse(response)
+            cleaned = SafeJSONParser.clean_json_text(response)
+            try:
+                plan = TriagePlan.model_validate_json(cleaned)
+                return plan.model_dump()
+            except ValidationError as validation_error:
+                print(f"Triage schema validation failed: {validation_error}")
+                fallback_data = SafeJSONParser.parse(response)
+                if isinstance(fallback_data, dict):
+                    raw_files = fallback_data.get("files_to_review", [])
+                    raw_focus = fallback_data.get("focus_areas", [])
+                    raw_budget = fallback_data.get("budget", "normal")
+                    raw_summary = fallback_data.get("summary")
+
+                    plan = TriagePlan(
+                        files_to_review=(
+                            [str(item) for item in raw_files]
+                            if isinstance(raw_files, list)
+                            else []
+                        ),
+                        focus_areas=(
+                            [str(item) for item in raw_focus]
+                            if isinstance(raw_focus, list)
+                            else []
+                        ),
+                        budget=str(raw_budget),
+                        summary=str(raw_summary) if raw_summary is not None else None,
+                    )
+                    return plan.model_dump()
+                raise
         except Exception as e:
             print(f"Triage failed (JSON error): {e}")
             # Fallback: review all filtered files
@@ -188,42 +226,57 @@ Diff:
                 response_format={"type": "json_object"},
             )
 
-            # Safe parsing with repair attempt
             try:
-                data = SafeJSONParser.parse(response)
-            except Exception:
-                print(f"JSON Parse failed for {file.path}. Content: {response[:50]}...")
-                return []
+                cleaned = SafeJSONParser.clean_json_text(response)
+                review_response = FocusedReviewResponse.model_validate_json(cleaned)
+                issue_candidates = review_response.issues
+            except ValidationError as validation_error:
+                print(
+                    f"Focused schema validation failed for {file.path}: {validation_error}"
+                )
+                try:
+                    data = SafeJSONParser.parse(response)
+                except Exception:
+                    print(
+                        f"JSON Parse failed for {file.path}. Content: {response[:50]}..."
+                    )
+                    return []
+
+                raw_issues = data.get("issues", []) if isinstance(data, dict) else []
+                issue_candidates: list[LLMIssueCandidate] = []
+                if isinstance(raw_issues, list):
+                    for raw_issue in raw_issues:
+                        if not isinstance(raw_issue, dict):
+                            continue
+                        try:
+                            issue_candidates.append(
+                                LLMIssueCandidate.model_validate(raw_issue)
+                            )
+                        except ValidationError:
+                            continue
 
             issues: list[Issue] = []
-            for item in data.get("issues", []):
-                if not isinstance(item, dict):
-                    continue
-
-                raw_line_start = item.get("line_start", 1)
-                raw_line_end = item.get("line_end", raw_line_start)
-                line_start = max(1, int(raw_line_start))
-                line_end = max(line_start, int(raw_line_end))
+            for candidate in issue_candidates:
+                line_start = max(1, int(candidate.line_start))
+                line_end = max(line_start, int(candidate.line_end))
                 evidence = self._build_issue_evidence(
                     file, docs_evidence, line_start, line_end
                 )
-                severity = self._parse_severity(item.get("severity"))
-                category = self._parse_category(item.get("category"))
-                raw_suggestion = item.get("suggestion")
-                suggestion = str(raw_suggestion) if raw_suggestion is not None else None
+                severity = self._parse_severity(candidate.severity)
+                category = self._parse_category(candidate.category)
 
                 issues.append(
                     Issue(
-                        id=str(item.get("id", "unknown")),
+                        id=candidate.id,
                         severity=severity,
                         category=category,
-                        title=str(item.get("title", "Issue")),
-                        message=str(item.get("message", "")),
+                        title=candidate.title,
+                        message=candidate.message,
                         path=file.path,
                         line_start=line_start,
                         line_end=line_end,
-                        suggestion=suggestion,
-                        confidence=float(item.get("confidence", 0.5)),
+                        suggestion=candidate.suggestion,
+                        confidence=float(candidate.confidence),
                         evidence=evidence,
                     )
                 )

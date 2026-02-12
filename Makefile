@@ -12,7 +12,7 @@ setup-dev: setup
 	$(PIP) install -e ".[dev]"
 
 test:
-	PYTHONPATH=. $(PYTHON) tests/test_flow.py
+	PYTHONPATH=. $(PYTHON) -m unittest discover -s tests -p "test_*.py"
 
 lint:
 	$(PYTHON) -m ruff check src tests

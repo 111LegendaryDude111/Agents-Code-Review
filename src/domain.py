@@ -84,6 +84,29 @@ class ChangedFile(BaseModel):
     is_vendor: bool = False
 
 
+class TriagePlan(BaseModel):
+    files_to_review: list[str] = Field(default_factory=list)
+    focus_areas: list[str] = Field(default_factory=list)
+    budget: str = "normal"
+    summary: str | None = None
+
+
+class LLMIssueCandidate(BaseModel):
+    id: str = "unknown"
+    severity: str = "NIT"
+    category: str = "STYLE"
+    title: str = "Issue"
+    message: str = ""
+    line_start: int = 1
+    line_end: int = 1
+    suggestion: str | None = None
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class FocusedReviewResponse(BaseModel):
+    issues: list[LLMIssueCandidate] = Field(default_factory=list)
+
+
 class ReviewResult(BaseModel):
     summary: str
     issues: list[Issue] = Field(default_factory=list)

@@ -9,11 +9,18 @@ class SecretRedactor:
     Redacts secrets from strings to prevent leakage in logs or comments.
     """
 
-    # Simple regex patterns for common secrets (can be expanded)
+    # Patterns prioritize high-signal secrets and quoted literal assignments
+    # to avoid over-redacting normal auth module code.
     PATTERNS = [
-        r'(?i)(api[_-]?key|token|secret|password|pwd|auth)[=:\s"]+([a-zA-Z0-9_\-]{8,})',
-        r"ghp_[a-zA-Z0-9]{36}",  # GitHub PAT
-        r"sk-[a-zA-Z0-9]{48}",  # OpenAI Key
+        # Generic secret-like assignment where literal value is explicitly present.
+        r"""(?i)\b(api[_-]?key|token|secret|password|passwrod|passw(?:o|or)?rd|pwd|auth)\b\s*[:=]\s*(['"])([^'"\r\n]{8,})\2""",
+        # GitHub fine-grained/classic tokens.
+        r"(github_pat_[A-Za-z0-9_]{82})",
+        r"(gh[opusr]_[A-Za-z0-9]{36})",
+        # OpenAI-style keys (sk-..., including project-prefixed forms).
+        r"\b(sk-[A-Za-z0-9_-]{20,})\b",
+        # Google/Gemini API keys.
+        r"\b(AIza[0-9A-Za-z\-_]{35})\b",
     ]
 
     def __init__(self):
@@ -28,13 +35,12 @@ class SecretRedactor:
 
             def replace_match(match: re.Match[str]) -> str:
                 full_match = match.group(0)
-                if match.groups():
-                    last_idx = match.lastindex
-                    if last_idx is None:
-                        return full_match
-                    value = match.group(last_idx)
-                    return full_match.replace(value, "********")
-                return full_match
+                last_idx = match.lastindex
+                if last_idx is None:
+                    return "********"
+
+                value = match.group(last_idx)
+                return full_match.replace(value, "********")
 
             redacted = pattern.sub(replace_match, redacted)
 
@@ -47,13 +53,12 @@ class SafeJSONParser:
     """
 
     @staticmethod
-    def parse(text: str) -> dict[str, Any]:
+    def clean_json_text(text: str) -> str:
         """
-        Tries to parse JSON, cleaning markdown code blocks if present.
+        Return text cleaned from markdown code fences.
         """
         cleaned = text.strip()
 
-        # Remove markdown code blocks ```json ... ```
         if cleaned.startswith("```"):
             lines = cleaned.splitlines()
             if lines and lines[0].strip().startswith("```"):
@@ -61,6 +66,15 @@ class SafeJSONParser:
             if lines and lines[-1].strip().startswith("```"):
                 lines = lines[:-1]
             cleaned = "\n".join(lines)
+
+        return cleaned
+
+    @staticmethod
+    def parse(text: str) -> dict[str, Any]:
+        """
+        Tries to parse JSON, cleaning markdown code blocks if present.
+        """
+        cleaned = SafeJSONParser.clean_json_text(text)
 
         try:
             return json.loads(cleaned)
