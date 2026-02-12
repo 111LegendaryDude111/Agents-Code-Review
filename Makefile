@@ -1,7 +1,9 @@
-.PHONY: setup setup-dev test lint format run run-full _run-dry clean
+.PHONY: setup setup-dev test lint format run run-full run-ollama run-ollama-full ollama-pull ollama-serve _run-dry clean
 
 PYTHON := .venv/bin/python
 PIP := .venv/bin/pip
+OLLAMA_BASE_URL_DEFAULT := http://127.0.0.1:11434/v1
+OLLAMA_MODEL_DEFAULT := qwen2.5-coder:7b
 
 setup:
 	python3 -m venv .venv
@@ -31,12 +33,42 @@ clean:
 # Usage:
 #   make run
 #   make run-full
+#   make run-ollama
+#   make run-ollama-full
 #   make run REPO=owner/repo PR=123 TOKEN=ghp_... [KEY=...]
 run: DRY_RUN_OUTPUT=summary
 run: _run-dry
 
 run-full: DRY_RUN_OUTPUT=full
 run-full: _run-dry
+
+run-ollama: DRY_RUN_OUTPUT=summary
+run-ollama: LLM_PROVIDER_OVERRIDE=ollama
+run-ollama: LLM_MODEL_OVERRIDE=$(OLLAMA_MODEL_DEFAULT)
+run-ollama: LLM_BASE_URL_OVERRIDE=$(OLLAMA_BASE_URL_DEFAULT)
+run-ollama: _run-dry
+
+run-ollama-full: DRY_RUN_OUTPUT=full
+run-ollama-full: LLM_PROVIDER_OVERRIDE=ollama
+run-ollama-full: LLM_MODEL_OVERRIDE=$(OLLAMA_MODEL_DEFAULT)
+run-ollama-full: LLM_BASE_URL_OVERRIDE=$(OLLAMA_BASE_URL_DEFAULT)
+run-ollama-full: _run-dry
+
+ollama-pull:
+	@if ! command -v ollama >/dev/null 2>&1; then \
+		echo "Error: ollama not found."; \
+		echo "Install it with: brew install ollama"; \
+		exit 1; \
+	fi
+	ollama pull $(OLLAMA_MODEL_DEFAULT)
+
+ollama-serve:
+	@if ! command -v ollama >/dev/null 2>&1; then \
+		echo "Error: ollama not found."; \
+		echo "Install it with: brew install ollama"; \
+		exit 1; \
+	fi
+	ollama serve
 
 _run-dry:
 	@set -a; \
@@ -47,15 +79,31 @@ _run-dry:
 	TOKEN_VAL="$(TOKEN)"; \
 	KEY_VAL="$(KEY)"; \
 	OUTPUT_MODE_VAL="$(DRY_RUN_OUTPUT)"; \
+	PROVIDER_VAL="$(LLM_PROVIDER_OVERRIDE)"; \
+	MODEL_VAL="$(LLM_MODEL_OVERRIDE)"; \
+	BASE_URL_VAL="$(LLM_BASE_URL_OVERRIDE)"; \
 	if [ -z "$$REPO_VAL" ]; then REPO_VAL="$$GITHUB_REPOSITORY"; fi; \
 	if [ -z "$$PR_VAL" ]; then PR_VAL="$$PR_NUMBER"; fi; \
 	if [ -z "$$TOKEN_VAL" ]; then TOKEN_VAL="$$GITHUB_TOKEN"; fi; \
-	if [ -z "$$KEY_VAL" ]; then KEY_VAL="$$GEMINI_API_KEY"; fi; \
-	if [ -z "$$KEY_VAL" ]; then KEY_VAL="$$OPENAI_API_KEY"; fi; \
+	if [ -z "$$PROVIDER_VAL" ]; then PROVIDER_VAL="$$LLM_PROVIDER"; fi; \
+	if [ -z "$$MODEL_VAL" ]; then MODEL_VAL="$$LLM_MODEL"; fi; \
+	if [ -z "$$BASE_URL_VAL" ]; then BASE_URL_VAL="$$LLM_BASE_URL"; fi; \
+	if [ -z "$$KEY_VAL" ]; then \
+		case "$$PROVIDER_VAL" in \
+			gemini) KEY_VAL="$$GEMINI_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="$$OPENAI_API_KEY" ;; \
+			openai) KEY_VAL="$$OPENAI_API_KEY" ;; \
+			ollama) KEY_VAL="$$OLLAMA_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="$$OPENAI_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="dummy" ;; \
+			*) KEY_VAL="$$GEMINI_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="$$OPENAI_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="$$OLLAMA_API_KEY" ;; \
+		esac; \
+	fi; \
 	if [ -z "$$OUTPUT_MODE_VAL" ]; then OUTPUT_MODE_VAL="summary"; fi; \
+	if [ -n "$$PROVIDER_VAL" ]; then export LLM_PROVIDER="$$PROVIDER_VAL"; fi; \
+	if [ -n "$$MODEL_VAL" ]; then export LLM_MODEL="$$MODEL_VAL"; fi; \
+	if [ -n "$$BASE_URL_VAL" ]; then export LLM_BASE_URL="$$BASE_URL_VAL"; fi; \
 	if [ -n "$$KEY_VAL" ]; then \
 		export GEMINI_API_KEY="$$KEY_VAL"; \
 		export OPENAI_API_KEY="$$KEY_VAL"; \
+		export OLLAMA_API_KEY="$$KEY_VAL"; \
 	fi; \
 	if [ -z "$$REPO_VAL" ] || [ -z "$$PR_VAL" ] || [ -z "$$TOKEN_VAL" ]; then \
 		echo "Error: missing required values (REPO, PR, TOKEN)."; \
