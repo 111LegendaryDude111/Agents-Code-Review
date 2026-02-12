@@ -104,8 +104,8 @@ class LLMIssueCandidate(BaseModel):
     category: Category = Category.STYLE
     title: str = "Issue"
     message: str = ""
-    line_start: int = 1
-    line_end: int = 1
+    line_start: int | None = None
+    line_end: int | None = None
     suggestion: str | None = None
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
 

@@ -21,6 +21,7 @@ class TestSecretRedactor(unittest.TestCase):
         self.assertIn("password", redacted)
         self.assertIn("passwrod", redacted)
         self.assertIn("api_key", redacted)
+        self.assertIn("********", redacted)
 
     def test_does_not_redact_regular_auth_code_references(self) -> None:
         text = "auth = authenticate_user(user, password)\nkey = derive_key(material)"
@@ -47,6 +48,17 @@ class TestSafeJSONParser(unittest.TestCase):
         raw = '{"key":"value"}\n```'
         cleaned = SafeJSONParser.clean_json_text(raw)
         self.assertEqual(cleaned, '{"key":"value"}')
+
+    def test_cleans_json_wrapped_with_text_and_fences(self) -> None:
+        raw = (
+            "Here is JSON:\n"
+            "```json\n"
+            '{"issues":[{"id":"a","line_start":2}]}\n'
+            "```\n"
+            "End."
+        )
+        cleaned = SafeJSONParser.clean_json_text(raw)
+        self.assertEqual(cleaned, '{"issues":[{"id":"a","line_start":2}]}')
 
 
 if __name__ == "__main__":

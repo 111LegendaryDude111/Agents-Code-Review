@@ -54,16 +54,67 @@ class SafeJSONParser:
     """
 
     @staticmethod
+    def _strip_markdown_fences(text: str) -> str:
+        lines: list[str] = []
+        for line in text.splitlines():
+            if line.strip().startswith("```"):
+                continue
+            lines.append(line)
+        return "\n".join(lines).strip()
+
+    @staticmethod
+    def _extract_first_json_payload(text: str) -> str:
+        start_candidates = [idx for idx in (text.find("{"), text.find("[")) if idx >= 0]
+        if not start_candidates:
+            return text.strip()
+
+        start_idx = min(start_candidates)
+        payload = text[start_idx:]
+        opening = payload[0]
+        closing = "}" if opening == "{" else "]"
+
+        depth = 0
+        in_string = False
+        is_escaped = False
+
+        for index, char in enumerate(payload):
+            if in_string:
+                if is_escaped:
+                    is_escaped = False
+                    continue
+                if char == "\\":
+                    is_escaped = True
+                    continue
+                if char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+                continue
+
+            if char == opening:
+                depth += 1
+                continue
+
+            if char == closing:
+                depth -= 1
+                if depth == 0:
+                    return payload[: index + 1].strip()
+
+        return payload.strip()
+
+    @staticmethod
     def clean_json_text(text: str) -> str:
         """
         Return text cleaned from markdown code fences.
         """
-        lines = text.strip().splitlines()
-        while lines and lines[0].strip().startswith("```"):
-            lines = lines[1:]
-        while lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        return "\n".join(lines).strip()
+        base = text.strip()
+        if not base:
+            return ""
+
+        no_fences = SafeJSONParser._strip_markdown_fences(base)
+        return SafeJSONParser._extract_first_json_payload(no_fences)
 
     @staticmethod
     def parse(text: str) -> dict[str, Any]:
@@ -76,5 +127,5 @@ class SafeJSONParser:
             return json.loads(cleaned)
         except json.JSONDecodeError as e:
             # TODO: Add more sophisticated repair (e.g. balancing braces) if needed
-            logging.error(f"JSON Parse Error: {e}. Content: {cleaned[:100]}...")
+            logging.error("JSON Parse Error: %s. Content: %s...", e, cleaned[:100])
             raise

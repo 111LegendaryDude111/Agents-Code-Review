@@ -1,4 +1,4 @@
-.PHONY: setup setup-dev test lint format run clean
+.PHONY: setup setup-dev test lint format run run-full _run-dry clean
 
 PYTHON := .venv/bin/python
 PIP := .venv/bin/pip
@@ -30,8 +30,15 @@ clean:
 # Example run command (dry-run by default)
 # Usage:
 #   make run
+#   make run-full
 #   make run REPO=owner/repo PR=123 TOKEN=ghp_... [KEY=...]
-run:
+run: DRY_RUN_OUTPUT=summary
+run: _run-dry
+
+run-full: DRY_RUN_OUTPUT=full
+run-full: _run-dry
+
+_run-dry:
 	@set -a; \
 	if [ -f .env ]; then . ./.env; fi; \
 	set +a; \
@@ -39,11 +46,13 @@ run:
 	PR_VAL="$(PR)"; \
 	TOKEN_VAL="$(TOKEN)"; \
 	KEY_VAL="$(KEY)"; \
+	OUTPUT_MODE_VAL="$(DRY_RUN_OUTPUT)"; \
 	if [ -z "$$REPO_VAL" ]; then REPO_VAL="$$GITHUB_REPOSITORY"; fi; \
 	if [ -z "$$PR_VAL" ]; then PR_VAL="$$PR_NUMBER"; fi; \
 	if [ -z "$$TOKEN_VAL" ]; then TOKEN_VAL="$$GITHUB_TOKEN"; fi; \
 	if [ -z "$$KEY_VAL" ]; then KEY_VAL="$$GEMINI_API_KEY"; fi; \
 	if [ -z "$$KEY_VAL" ]; then KEY_VAL="$$OPENAI_API_KEY"; fi; \
+	if [ -z "$$OUTPUT_MODE_VAL" ]; then OUTPUT_MODE_VAL="summary"; fi; \
 	if [ -n "$$KEY_VAL" ]; then \
 		export GEMINI_API_KEY="$$KEY_VAL"; \
 		export OPENAI_API_KEY="$$KEY_VAL"; \
@@ -53,4 +62,4 @@ run:
 		echo "Fill .env or run: make run REPO=owner/repo PR=123 TOKEN=ghp_... [KEY=...]"; \
 		exit 1; \
 	fi; \
-	GITHUB_TOKEN="$$TOKEN_VAL" $(PYTHON) -m src.main review --repo "$$REPO_VAL" --pr "$$PR_VAL" --dry-run
+	GITHUB_TOKEN="$$TOKEN_VAL" $(PYTHON) -m src.main review --repo "$$REPO_VAL" --pr "$$PR_VAL" --dry-run --dry-run-output "$$OUTPUT_MODE_VAL"

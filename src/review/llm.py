@@ -2,9 +2,27 @@ import os
 from typing import Any
 
 import openai
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import (
+    RetryError,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from ..safety.env_loader import load_env_file
+
+
+def is_rate_limit_error(exc: BaseException) -> bool:
+    if isinstance(exc, openai.RateLimitError):
+        return True
+    if isinstance(exc, RetryError):
+        try:
+            last_exc = exc.last_attempt.exception()
+        except Exception:
+            return False
+        return isinstance(last_exc, openai.RateLimitError)
+    return False
 
 
 class LLMClient:
@@ -54,7 +72,17 @@ class LLMClient:
         self.model = model or os.getenv("LLM_MODEL") or default_model
 
     @retry(
-        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10)
+        retry=retry_if_exception_type(
+            (
+                openai.RateLimitError,
+                openai.APIConnectionError,
+                openai.APITimeoutError,
+                openai.InternalServerError,
+            )
+        ),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        reraise=True,
     )
     def get_completion(
         self,

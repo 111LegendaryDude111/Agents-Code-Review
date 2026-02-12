@@ -85,6 +85,11 @@ make setup-dev
 make run
 ```
 
+Полный вывод (summary + полный `result.json` в терминале):
+```bash
+make run-full
+```
+
 Переопределение значений при необходимости:
 ```bash
 make run REPO=owner/repo PR=123 TOKEN=ghp_... KEY=...
