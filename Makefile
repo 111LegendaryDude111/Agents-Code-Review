@@ -11,8 +11,6 @@ setup:
 	python3 -m venv .venv
 	$(PIP) install --upgrade pip
 	$(PIP) install -e .
-
-setup-dev: setup
 	$(PIP) install -e ".[dev]"
 
 test:

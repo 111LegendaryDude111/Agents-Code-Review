@@ -1,26 +1,9 @@
-# AI Code Review
+# AI Code Reviewer
 
-This project is a lightweight AI reviewer for pull requests in CI/CD.
-It analyzes code diffs with an LLM, applies policy filters, and publishes concise review feedback to GitHub PRs.
+## About the Project
+AI Code Reviewer is an automated code review tool leveraging Artificial Intelligence (LLM) capabilities. It integrates into CI/CD pipelines (GitHub Actions, GitLab CI) and assists in conducting high-quality analysis of changes in Pull Requests.
 
-The tool is designed to be advisory (non-blocking): it highlights risks, prioritizes important issues, and keeps comments synchronized across runs to avoid noise.
-
-## Default LLM Backend
-
-The default provider is Hugging Face Inference API (OpenAI-compatible endpoint).
-
-## Project Context
-
-The review pipeline can pre-generate `project-context.json` and inject it into LLM prompts to improve relevance and reduce noisy comments.
-
-- Local: `make build-context`
-- CI: generated before review in `.github/workflows/ai-review.yml`
-
-## Hugging Face API Key
-
-1. Create or sign in to your Hugging Face account.
-2. Open `https://huggingface.co/settings/tokens`.
-3. Create a token (read or fine-grained) and enable permission: `Make calls to Inference Providers`.
-4. Configure the token:
-   - Local: set `HF_TOKEN=hf_...` in `.env`
-   - CI (GitHub Actions): add repository secret `HF_TOKEN`
+## Benefits
+*   **Time Saving**: Automates routine code review tasks, allowing developers to focus on architecture and logic.
+*   **Intelligent Analysis**: Uses modern LLMs (OpenAI, Gemini, Ollama) for deep understanding of change context, finding issues missed by standard linters.
+*   **Code Quality Improvement**: Identifies potential errors, vulnerabilities, and coding standard violations at early stages.
