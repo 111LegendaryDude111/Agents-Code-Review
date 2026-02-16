@@ -55,8 +55,20 @@ DEFAULT_DOC_EXCERPT_CHARS = 700
 
 class ContextBuilder:
     def __init__(self, workspace_root: str = "."):
-        self.workspace_root = workspace_root
+        self.workspace_root = os.path.abspath(workspace_root)
+        self.workspace_real_root = os.path.realpath(self.workspace_root)
         self.docs_cache: dict[str, str] = {}
+
+    def _normalize_real_path(self, path: str) -> str:
+        return os.path.realpath(os.path.abspath(path))
+
+    def _is_within_workspace(self, path: str) -> bool:
+        candidate = self._normalize_real_path(path)
+        try:
+            common = os.path.commonpath([self.workspace_real_root, candidate])
+        except ValueError:
+            return False
+        return common == self.workspace_real_root
 
     def _iter_project_files(self):
         for root, dirs, files in os.walk(self.workspace_root):
@@ -66,16 +78,21 @@ class ContextBuilder:
                 if d not in IGNORED_DIRS and not d.startswith(".pytest_cache")
             ]
             for filename in files:
-                yield os.path.join(root, filename)
+                file_path = os.path.join(root, filename)
+                if not self._is_within_workspace(file_path):
+                    continue
+                yield file_path
 
     def _read_text_file(self, path: str) -> str:
-        normalized_path = os.path.abspath(path)
+        normalized_path = self._normalize_real_path(path)
+        if not self._is_within_workspace(normalized_path):
+            return ""
         if normalized_path in self.docs_cache:
             return self.docs_cache[normalized_path]
         try:
             with open(normalized_path, encoding="utf-8", errors="ignore") as f:
                 content = f.read()
-        except Exception:
+        except (OSError, UnicodeError):
             content = ""
         self.docs_cache[normalized_path] = content
         return content

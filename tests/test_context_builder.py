@@ -40,6 +40,37 @@ class TestContextBuilder(unittest.TestCase):
             self.assertIn("Project Summary:", rendered)
             self.assertIn("Current File: src/main.py", rendered)
 
+    def test_read_text_file_rejects_path_outside_workspace(self):
+        with tempfile.TemporaryDirectory() as workspace:
+            with tempfile.TemporaryDirectory() as outside:
+                outside_file = os.path.join(outside, "secret.txt")
+                with open(outside_file, "w", encoding="utf-8") as f:
+                    f.write("should not be readable")
+
+                builder = ContextBuilder(workspace_root=workspace)
+                self.assertEqual(builder._read_text_file(outside_file), "")
+
+    def test_iter_project_files_skips_symlink_target_outside_workspace(self):
+        if not hasattr(os, "symlink"):
+            self.skipTest("Symlink is not supported on this platform.")
+
+        with tempfile.TemporaryDirectory() as workspace:
+            with tempfile.TemporaryDirectory() as outside:
+                outside_file = os.path.join(outside, "external.py")
+                with open(outside_file, "w", encoding="utf-8") as f:
+                    f.write("print('outside')\n")
+
+                link_path = os.path.join(workspace, "linked_external.py")
+                try:
+                    os.symlink(outside_file, link_path)
+                except (NotImplementedError, OSError):
+                    self.skipTest("Unable to create symlink on this environment.")
+
+                builder = ContextBuilder(workspace_root=workspace)
+                files = list(builder._iter_project_files())
+                self.assertNotIn(link_path, files)
+                self.assertEqual(builder._read_text_file(link_path), "")
+
 
 if __name__ == "__main__":
     unittest.main()
