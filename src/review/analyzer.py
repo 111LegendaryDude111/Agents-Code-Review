@@ -92,6 +92,19 @@ class ReviewAnalyzer:
             return max(1, file.hunks[0].new_start)
         return 1
 
+    def _collect_known_new_lines(self, file: ChangedFile) -> set[int]:
+        known_lines: set[int] = set()
+        for hunk in file.hunks:
+            new_line = hunk.new_start
+            for raw_line in hunk.lines:
+                prefix = raw_line[:1] if raw_line else ""
+                if prefix in {"+", " "}:
+                    known_lines.add(max(1, new_line))
+                    new_line += 1
+                elif prefix == "-":
+                    continue
+        return known_lines
+
     def _resolve_line_range(
         self, file: ChangedFile, candidate: LLMIssueCandidate
     ) -> tuple[int, int]:
@@ -100,7 +113,13 @@ class ReviewAnalyzer:
         """
         default_line = self._find_default_line(file)
         raw_start = (
-            candidate.line_start if candidate.line_start is not None else default_line
+            candidate.line_start
+            if candidate.line_start is not None
+            else (
+                candidate.line_end
+                if candidate.line_end is not None
+                else default_line
+            )
         )
         raw_end = candidate.line_end if candidate.line_end is not None else raw_start
         line_start = max(1, int(raw_start))
@@ -259,6 +278,7 @@ Analyze the provided code diff and documentation evidence.
 Identify list of issues.
 Review policy (strict, low-noise):
 - Report only issues that are directly verifiable from the provided diff and evidence.
+- Every reported issue must point to a concrete diff line range (line_start/line_end) from the provided patch.
 - Do not report speculative issues that require unseen runtime context or assumptions.
 - Do not report style/naming/preferences unless they cause a real correctness, security, or performance impact.
 - If unsure, do not emit an issue.
@@ -368,8 +388,17 @@ Diff:
                             continue
 
             issues: list[Issue] = []
+            known_new_lines = self._collect_known_new_lines(file)
             for candidate in issue_candidates:
+                if candidate.line_start is None and candidate.line_end is None:
+                    continue
                 line_start, line_end = self._resolve_line_range(file, candidate)
+                if known_new_lines:
+                    overlaps_diff = any(
+                        line in known_new_lines for line in range(line_start, line_end + 1)
+                    )
+                    if not overlaps_diff:
+                        continue
                 evidence = self._build_issue_evidence(
                     file, docs_evidence, line_start, line_end
                 )
