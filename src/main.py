@@ -1,8 +1,9 @@
 import json
+from typing import Any
 
 import click
 
-from .domain import Issue, ReviewResult, Severity
+from .domain import ChangedFile, Issue, ReviewResult, Severity
 from .providers.github_provider import GitHubProvider
 from .review.llm import is_rate_limit_error
 from .safety.env_loader import load_env_file
@@ -32,10 +33,56 @@ def _print_dry_run_details(summary_md: str, result_json: str) -> None:
     click.echo(result_json)
 
 
+def _load_or_build_project_context(
+    builder: Any,
+    context_path: str,
+    docs_paths: list[str],
+    changed_files: list[ChangedFile],
+) -> dict[str, Any]:
+    loaded = builder.load_project_context(context_path)
+    if loaded is not None:
+        click.echo(f"Loaded project context: {context_path}")
+        return loaded
+
+    generated = builder.build_project_context(
+        docs_paths=docs_paths,
+        changed_files=changed_files,
+    )
+    builder.save_project_context(context_path, generated)
+    click.echo(f"Generated project context: {context_path}")
+    return generated
+
+
 @click.group()
 def cli():
     """AI Code Review CLI"""
     pass
+
+
+@cli.command("build-context")
+@click.option(
+    "--workspace-root",
+    default=".",
+    show_default=True,
+    help="Workspace root for context indexing",
+)
+@click.option(
+    "--output",
+    "output_path",
+    envvar="PROJECT_CONTEXT_PATH",
+    default="project-context.json",
+    show_default=True,
+    help="Path to generated project context JSON",
+)
+def build_context(workspace_root: str, output_path: str) -> None:
+    """Build and save project context for review prompts."""
+    from .context_builder.builder import ContextBuilder
+
+    builder = ContextBuilder(workspace_root=workspace_root)
+    docs_paths = builder.load_project_docs()
+    context = builder.build_project_context(docs_paths=docs_paths)
+    builder.save_project_context(output_path, context)
+    click.echo(f"Project context generated: {output_path}")
 
 
 @cli.command()
@@ -67,6 +114,13 @@ def cli():
     show_default=True,
     help="Dry-run console output mode",
 )
+@click.option(
+    "--project-context-path",
+    envvar="PROJECT_CONTEXT_PATH",
+    default="project-context.json",
+    show_default=True,
+    help="Path to project context JSON used in prompts",
+)
 def review(
     provider: str,
     token: str | None,
@@ -75,6 +129,7 @@ def review(
     llm_key: str | None,
     dry_run: bool,
     dry_run_output: str,
+    project_context_path: str,
 ) -> None:
     """Run code review on a Pull Request."""
     click.echo(f"Starting review for {repo} PR #{pr} using {provider}...")
@@ -119,6 +174,14 @@ def review(
         f"(Risk Score: {filter_result.risk_score})"
     )
 
+    project_context = _load_or_build_project_context(
+        builder=builder,
+        context_path=project_context_path,
+        docs_paths=docs_paths,
+        changed_files=filter_result.files_to_review,
+    )
+    triage_context = builder.format_project_context(project_context, max_chars=2200)
+
     # 5. Retrieval
     from .retrieval.engine import DocRetriever
 
@@ -139,7 +202,11 @@ def review(
 
     # Triage
     click.echo("Running Triage...")
-    triage_plan = analyzer.triage(filter_result, meta)
+    triage_plan = analyzer.triage(
+        filter_result,
+        meta,
+        project_context=triage_context,
+    )
     click.echo(f"Triage Plan: {json.dumps(triage_plan, indent=2)}")
     triage_summary = triage_plan.get("summary")
     if isinstance(triage_summary, str) and triage_summary.strip():
@@ -159,9 +226,18 @@ def review(
             click.echo(f"Reviewing {file.path}...")
             # Retrieve specific docs (mock query)
             evidence = retriever.retrieve_relevant_docs(f"standards for {file.path}")
+            file_context = builder.format_project_context(
+                project_context,
+                file_path=file.path,
+                max_chars=1800,
+            )
 
             try:
-                file_issues = analyzer.review_file(file, evidence)
+                file_issues = analyzer.review_file(
+                    file,
+                    evidence,
+                    project_context=file_context,
+                )
             except Exception as error:
                 if is_rate_limit_error(error):
                     rate_limit_reached = True

@@ -28,6 +28,7 @@ htmlcov/
 
 # Project artifacts
 result.json
+project-context.json
 artifacts/
 reports/
 

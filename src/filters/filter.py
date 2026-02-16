@@ -1,5 +1,6 @@
 import fnmatch
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 from ..domain import ChangedFile
 
@@ -17,6 +18,33 @@ DEFAULT_IGNORE_PATTERNS = [
     "__pycache__/**",
     "*.pyc",
 ]
+
+DEFAULT_CODE_EXTENSIONS = {
+    ".py",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".java",
+    ".kt",
+    ".go",
+    ".rs",
+    ".rb",
+    ".php",
+    ".swift",
+    ".scala",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".cs",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".ps1",
+    ".sql",
+}
 
 RISK_PATTERNS = {
     "auth": ["**/auth/**", "**/login/**", "**/security/**", "**/permission/**"],
@@ -36,8 +64,13 @@ class FilterResult:
 
 
 class FileFilter:
-    def __init__(self, ignore_patterns: list[str] | None = None):
+    def __init__(
+        self,
+        ignore_patterns: list[str] | None = None,
+        code_extensions: set[str] | None = None,
+    ):
         self.ignore_patterns = ignore_patterns or DEFAULT_IGNORE_PATTERNS
+        self.code_extensions = code_extensions or DEFAULT_CODE_EXTENSIONS
 
     def filter_files(self, files: list[ChangedFile]) -> FilterResult:
         to_review: list[ChangedFile] = []
@@ -47,6 +80,10 @@ class FileFilter:
         for file in files:
             if self._should_ignore(file.path):
                 file.is_generated = True
+                excluded.append(file)
+                continue
+
+            if not self._is_project_code(file.path):
                 excluded.append(file)
                 continue
 
@@ -63,6 +100,10 @@ class FileFilter:
 
     def _should_ignore(self, path: str) -> bool:
         return any(fnmatch.fnmatch(path, pattern) for pattern in self.ignore_patterns)
+
+    def _is_project_code(self, path: str) -> bool:
+        ext = PurePosixPath(path).suffix.lower()
+        return ext in self.code_extensions
 
     def _analyze_risk(self, file: ChangedFile, factors: set[str]) -> None:
         for category, patterns in RISK_PATTERNS.items():

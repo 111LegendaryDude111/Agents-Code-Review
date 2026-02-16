@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_LINE_EXCERPT_MAX_CHARS = 200
 DEFAULT_EXCERPT_MAX_CHARS = 500
 DEFAULT_FALLBACK_HUNK_LINES = 5
+DEFAULT_PROJECT_CONTEXT_MAX_CHARS = 2200
 
 
 class ReviewAnalyzer:
@@ -162,7 +163,10 @@ class ReviewAnalyzer:
         )
 
     def triage(
-        self, filter_result: FilterResult, pr_meta: dict[str, Any]
+        self,
+        filter_result: FilterResult,
+        pr_meta: dict[str, Any],
+        project_context: str | None = None,
     ) -> dict[str, Any]:
         """
         Determine which files to review and set budget.
@@ -187,6 +191,12 @@ Language rules:
             for f in filter_result.files_to_review
         )
 
+        context_text = (project_context or "").strip()
+        if len(context_text) > DEFAULT_PROJECT_CONTEXT_MAX_CHARS:
+            context_text = (
+                f"{context_text[: DEFAULT_PROJECT_CONTEXT_MAX_CHARS - 3].rstrip()}..."
+            )
+
         user_prompt = f"""
 PR Title: {pr_meta.get('title')}
 Description: {pr_meta.get('body')}
@@ -196,6 +206,8 @@ Risk Factors: {filter_result.risk_factors}
 Changed Files:
 {files_summary}
 """
+        if context_text:
+            user_prompt += f"\nProject Context:\n{context_text}\n"
         from ..safety.utils import SafeJSONParser
 
         try:
@@ -234,7 +246,10 @@ Changed Files:
             return {"files_to_review": [f.path for f in filter_result.files_to_review]}
 
     def review_file(
-        self, file: ChangedFile, docs_evidence: list[Evidence]
+        self,
+        file: ChangedFile,
+        docs_evidence: list[Evidence],
+        project_context: str | None = None,
     ) -> list[Issue]:
         """
         Review a single file using LLM with safety and reliability.
@@ -242,6 +257,18 @@ Changed Files:
         system_prompt = """You are a Senior Code Reviewer.
 Analyze the provided code diff and documentation evidence.
 Identify list of issues.
+Review policy (strict, low-noise):
+- Report only issues that are directly verifiable from the provided diff and evidence.
+- Do not report speculative issues that require unseen runtime context or assumptions.
+- Do not report style/naming/preferences unless they cause a real correctness, security, or performance impact.
+- If unsure, do not emit an issue.
+- Prefer fewer high-signal issues over long lists.
+- If no actionable defects are found, return an empty "issues" array.
+Severity guidance:
+- BLOCKER: proven correctness/security issue with high impact.
+- IMPORTANT: likely functional/performance defect with meaningful impact.
+- QUESTION/NIT: use sparingly, only when clearly actionable.
+- For BLOCKER/IMPORTANT include a concrete, minimal suggestion.
 Language rules:
 - Return all human-readable issue text in Russian (ru-RU): title, message, suggestion.
 - Keep JSON keys, enum values (severity/category), file paths, and code tokens unchanged.
@@ -269,6 +296,12 @@ Output strictly JSON:
 
         evidence_text = "\n".join([f"[{e.source}]: {e.excerpt}" for e in docs_evidence])
 
+        context_text = (project_context or "").strip()
+        if len(context_text) > DEFAULT_PROJECT_CONTEXT_MAX_CHARS:
+            context_text = (
+                f"{context_text[: DEFAULT_PROJECT_CONTEXT_MAX_CHARS - 3].rstrip()}..."
+            )
+
         user_prompt = f"""
 File: {file.path}
 Additions: {file.additions}, Deletions: {file.deletions}
@@ -279,6 +312,8 @@ Relevant Generic Docs:
 Diff:
 {diff_content}
 """
+        if context_text:
+            user_prompt += f"\nProject Context:\n{context_text}\n"
         from ..safety.utils import SafeJSONParser, SecretRedactor
 
         redactor = SecretRedactor()

@@ -1,4 +1,4 @@
-.PHONY: setup setup-dev test lint format run run-full run-hf run-hf-full run-ollama run-ollama-full ollama-pull ollama-serve _run-dry clean
+.PHONY: setup setup-dev test lint format build-context run run-full run-hf run-hf-full run-ollama run-ollama-full ollama-pull ollama-serve _run-dry clean
 
 PYTHON := .venv/bin/python
 PIP := .venv/bin/pip
@@ -26,6 +26,14 @@ format:
 	$(PYTHON) -m ruff check --fix src tests
 	$(PYTHON) -m black src tests
 
+build-context:
+	@set -a; \
+	if [ -f .env ]; then . ./.env; fi; \
+	set +a; \
+	CONTEXT_PATH_VAL="$$PROJECT_CONTEXT_PATH"; \
+	if [ -z "$$CONTEXT_PATH_VAL" ]; then CONTEXT_PATH_VAL="project-context.json"; fi; \
+	$(PYTHON) -m src.main build-context --workspace-root "." --output "$$CONTEXT_PATH_VAL"
+
 clean:
 	rm -rf .venv
 	find . -type d -name "__pycache__" -exec rm -rf {} +
@@ -33,6 +41,7 @@ clean:
 
 # Example run command (dry-run by default)
 # Usage:
+#   make build-context
 #   make run
 #   make run-full
 #   make run-hf

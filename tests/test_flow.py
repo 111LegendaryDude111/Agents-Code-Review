@@ -30,6 +30,25 @@ class TestReviewFlow(unittest.TestCase):
         self.assertIn("auth", result.risk_factors)
         self.assertGreater(result.risk_score, 0)
 
+    def test_filter_excludes_config_and_env_files(self):
+        files = [
+            ChangedFile(path=".github/workflows/ai-review.yml", status="modified"),
+            ChangedFile(path=".env.example", status="modified"),
+            ChangedFile(path="README.md", status="modified"),
+            ChangedFile(path="Makefile", status="modified"),
+            ChangedFile(path="src/main.py", status="modified"),
+            ChangedFile(path="scripts/check.sh", status="modified"),
+        ]
+
+        filtr = FileFilter()
+        result = filtr.filter_files(files)
+
+        self.assertEqual(
+            sorted([f.path for f in result.files_to_review]),
+            ["scripts/check.sh", "src/main.py"],
+        )
+        self.assertEqual(len(result.excluded_files), 4)
+
     @patch("src.review.llm.LLMClient")
     def test_analyzer_triage(self, MockLLM):
         llm = MockLLM.return_value

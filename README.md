@@ -9,6 +9,13 @@ The tool is designed to be advisory (non-blocking): it highlights risks, priorit
 
 The default provider is Hugging Face Inference API (OpenAI-compatible endpoint).
 
+## Project Context
+
+The review pipeline can pre-generate `project-context.json` and inject it into LLM prompts to improve relevance and reduce noisy comments.
+
+- Local: `make build-context`
+- CI: generated before review in `.github/workflows/ai-review.yml`
+
 ## Hugging Face API Key
 
 1. Create or sign in to your Hugging Face account.
