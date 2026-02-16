@@ -1,0 +1,222 @@
+name: AI Review Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ai-review:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      LLM_PROVIDER: gemini
+      LLM_MODEL: gemini-2.5-flash
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate required secrets
+        run: |
+          if [ -z "${GEMINI_API_KEY}" ]; then
+            echo "Missing secret: GEMINI_API_KEY"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: make setup
+
+      - name: Run AI review
+        run: make run
+
+      - name: Publish AI review comments to PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require("fs");
+            const crypto = require("crypto");
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = context.issue.number;
+
+            if (!issue_number) {
+              core.warning("No pull request context. Skipping comment publish.");
+              return;
+            }
+
+            if (!fs.existsSync("result.json")) {
+              core.warning("result.json not found. Skipping comment publish.");
+              return;
+            }
+
+            let result;
+            try {
+              result = JSON.parse(fs.readFileSync("result.json", "utf8"));
+            } catch (error) {
+              core.warning(`Failed to parse result.json: ${error.message}`);
+              return;
+            }
+
+            const issues = Array.isArray(result.issues) ? result.issues : [];
+            const summary = String(result.summary || "").trim();
+            const decision = String(result.decision || "WARN");
+            const stats = result.stats && typeof result.stats === "object" ? result.stats : {};
+            const riskScore = stats.risk_score ?? "n/a";
+
+            const summaryMarker = "<!-- ai-review:summary -->";
+            const issueMarkerPrefix = "<!-- ai-review:item:";
+
+            const formatSummaryBody = () => {
+              const topLine = `### Ai review`;
+              const statusLine = `**Decision**: ${decision} | **Risk score**: ${riskScore}`;
+              const summaryText = summary || "No summary provided.";
+              return `${summaryMarker}\n${topLine}\n\n${statusLine}\n\n${summaryText}`;
+            };
+
+            const formatIssueBody = (issue, marker) => {
+              const severity = issue.severity || "NIT";
+              const title = issue.title || "Issue";
+              const path = issue.path || "unknown";
+              const lineStart = issue.line_start ?? "?";
+              const lineEnd = issue.line_end ?? lineStart;
+              const message = issue.message || "";
+              const confidence =
+                typeof issue.confidence === "number"
+                  ? issue.confidence.toFixed(2)
+                  : "n/a";
+
+              let body =
+                `${marker}\n` +
+                `### Ai review\n\n` +
+                `**[${severity}]** ${title}\n\n` +
+                `\`${path}:${lineStart}-${lineEnd}\`\n\n` +
+                `${message}\n\n` +
+                `confidence: ${confidence}`;
+
+              if (issue.suggestion) {
+                body += `\n\nSuggestion:\n\`\`\`\n${issue.suggestion}\n\`\`\``;
+              }
+
+              return body;
+            };
+
+            const toIssueKey = (issue) => {
+              const fingerprint = issue.fingerprint
+                || `${issue.path || "unknown"}:${issue.line_start || "?"}:${issue.title || "Issue"}`;
+              const hash = crypto.createHash("sha1").update(String(fingerprint)).digest("hex").slice(0, 16);
+              return hash;
+            };
+
+            const existingComments = await github.paginate(
+              github.rest.issues.listComments,
+              {
+                owner,
+                repo,
+                issue_number,
+                per_page: 100,
+              }
+            );
+
+            const summaryBody = formatSummaryBody();
+            const existingSummary = existingComments.find((c) =>
+              (c.body || "").includes(summaryMarker)
+            );
+            if (existingSummary) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existingSummary.id,
+                body: summaryBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body: summaryBody,
+              });
+            }
+
+            const desiredByKey = new Map();
+            for (const issue of issues) {
+              const key = toIssueKey(issue);
+              const marker = `${issueMarkerPrefix}${key} -->`;
+              desiredByKey.set(key, formatIssueBody(issue, marker));
+            }
+
+            const existingIssueComments = existingComments.filter((c) =>
+              (c.body || "").includes(issueMarkerPrefix)
+            );
+            const seenKeys = new Set();
+
+            for (const comment of existingIssueComments) {
+              const body = comment.body || "";
+              const match = body.match(/<!-- ai-review:item:([a-f0-9]+) -->/);
+              if (!match) {
+                continue;
+              }
+              const key = match[1];
+              seenKeys.add(key);
+              if (!desiredByKey.has(key)) {
+                await github.rest.issues.deleteComment({
+                  owner,
+                  repo,
+                  comment_id: comment.id,
+                });
+                continue;
+              }
+
+              const newBody = desiredByKey.get(key);
+              if (newBody && newBody !== body) {
+                await github.rest.issues.updateComment({
+                  owner,
+                  repo,
+                  comment_id: comment.id,
+                  body: newBody,
+                });
+              }
+            }
+
+            for (const [key, body] of desiredByKey) {
+              if (seenKeys.has(key)) {
+                continue;
+              }
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
+
+            core.info(`Published Ai review comments: ${desiredByKey.size} issue comment(s).`);
+
+      - name: Upload review artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-review-result
+          path: result.json
+          if-no-files-found: ignore
