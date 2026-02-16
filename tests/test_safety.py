@@ -31,13 +31,15 @@ class TestSecretRedactor(unittest.TestCase):
 
     def test_redacts_known_token_formats(self) -> None:
         token = "ghp_" + "a" * 36
+        hf_token = "hf_" + "A" * 34
         openai_key = "sk-" + "A" * 30
         gemini_key = "AIza" + "A" * 35
-        text = f"{token}\n{openai_key}\n{gemini_key}"
+        text = f"{token}\n{hf_token}\n{openai_key}\n{gemini_key}"
 
         redacted = self.redactor.redact(text)
 
         self.assertNotIn(token, redacted)
+        self.assertNotIn(hf_token, redacted)
         self.assertNotIn(openai_key, redacted)
         self.assertNotIn(gemini_key, redacted)
         self.assertIn("********", redacted)

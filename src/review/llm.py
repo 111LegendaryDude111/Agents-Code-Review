@@ -12,6 +12,8 @@ from tenacity import (
 
 from ..safety.env_loader import load_env_file
 
+DEFAULT_HUGGINGFACE_MODEL = "Qwen/Qwen2.5-Coder-32B-Instruct"
+DEFAULT_HUGGINGFACE_BASE_URL = "https://router.huggingface.co/v1"
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
@@ -53,13 +55,33 @@ class LLMClient:
         # Load .env values for local/dev usage.
         load_env_file(".env")
 
-        provider = (os.getenv("LLM_PROVIDER", "gemini")).strip().lower()
+        provider = (os.getenv("LLM_PROVIDER", "huggingface")).strip().lower()
+        if provider == "hf":
+            provider = "huggingface"
         self.provider = provider
         resolved_base_url = _first_non_empty(base_url)
         provider_default_model: str
         provider_model_override: str | None = None
 
-        if provider == "gemini":
+        if provider == "huggingface":
+            resolved_api_key = _first_non_empty(
+                api_key,
+                os.getenv("HF_TOKEN"),
+                os.getenv("HUGGINGFACE_API_KEY"),
+                os.getenv("OPENAI_API_KEY"),
+            )
+            if not resolved_base_url:
+                resolved_base_url = _first_non_empty(
+                    os.getenv("HUGGINGFACE_BASE_URL"),
+                    os.getenv("LLM_BASE_URL"),
+                    DEFAULT_HUGGINGFACE_BASE_URL,
+                )
+            provider_default_model = DEFAULT_HUGGINGFACE_MODEL
+            provider_model_override = _first_non_empty(
+                os.getenv("HUGGINGFACE_MODEL"),
+                os.getenv("HF_MODEL"),
+            )
+        elif provider == "gemini":
             resolved_api_key = _first_non_empty(
                 api_key, os.getenv("GEMINI_API_KEY"), os.getenv("OPENAI_API_KEY")
             )
@@ -106,12 +128,12 @@ class LLMClient:
             provider_model_override = _first_non_empty(os.getenv("VLLM_MODEL"))
         else:
             raise ValueError(
-                "Unsupported LLM_PROVIDER. Use one of: gemini, openai, ollama, vllm."
+                "Unsupported LLM_PROVIDER. Use one of: huggingface, gemini, openai, ollama, vllm."
             )
 
         if not resolved_api_key:
             raise ValueError(
-                "LLM API key is missing. Set GEMINI_API_KEY / OPENAI_API_KEY / OLLAMA_API_KEY / VLLM_API_KEY."
+                "LLM API key is missing. Set HF_TOKEN / HUGGINGFACE_API_KEY / GEMINI_API_KEY / OPENAI_API_KEY / OLLAMA_API_KEY / VLLM_API_KEY."
             )
 
         # Use explicit args to keep static type checkers happy.

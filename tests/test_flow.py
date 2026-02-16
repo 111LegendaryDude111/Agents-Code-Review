@@ -30,6 +30,25 @@ class TestReviewFlow(unittest.TestCase):
         self.assertIn("auth", result.risk_factors)
         self.assertGreater(result.risk_score, 0)
 
+    def test_filter_excludes_config_and_env_files(self):
+        files = [
+            ChangedFile(path=".github/workflows/ai-review.yml", status="modified"),
+            ChangedFile(path=".env.example", status="modified"),
+            ChangedFile(path="README.md", status="modified"),
+            ChangedFile(path="Makefile", status="modified"),
+            ChangedFile(path="src/main.py", status="modified"),
+            ChangedFile(path="scripts/check.sh", status="modified"),
+        ]
+
+        filtr = FileFilter()
+        result = filtr.filter_files(files)
+
+        self.assertEqual(
+            sorted([f.path for f in result.files_to_review]),
+            ["scripts/check.sh", "src/main.py"],
+        )
+        self.assertEqual(len(result.excluded_files), 4)
+
     @patch("src.review.llm.LLMClient")
     def test_analyzer_triage(self, MockLLM):
         llm = MockLLM.return_value
@@ -66,6 +85,7 @@ class TestReviewFlow(unittest.TestCase):
                         "message": "Check null handling.",
                         "line_start": 3,
                         "line_end": 3,
+                        "suggestion": "Add explicit null check before access.",
                         "confidence": 0.9,
                     }
                 ]
@@ -137,9 +157,49 @@ class TestReviewFlow(unittest.TestCase):
         )
 
         issues = analyzer.review_file(file, docs_evidence=[])
-        self.assertEqual(len(issues), 1)
-        self.assertEqual(issues[0].line_start, 2)
-        self.assertEqual(issues[0].line_end, 2)
+        self.assertEqual(len(issues), 0)
+
+    @patch("src.review.llm.LLMClient")
+    def test_review_drops_issue_outside_changed_lines(self, MockLLM):
+        llm = MockLLM.return_value
+        llm.get_completion.return_value = json.dumps(
+            {
+                "issues": [
+                    {
+                        "id": "issue-out-of-range",
+                        "severity": "IMPORTANT",
+                        "category": "BUG",
+                        "title": "Wrong target line",
+                        "message": "Points to a line outside diff range.",
+                        "line_start": 999,
+                        "line_end": 999,
+                        "suggestion": "Adjust to real changed line.",
+                        "confidence": 0.95,
+                    }
+                ]
+            }
+        )
+
+        analyzer = ReviewAnalyzer(llm)
+        file = ChangedFile(
+            path="src/logic.py",
+            status="modified",
+            additions=1,
+            deletions=0,
+            hunks=[
+                DiffHunk(
+                    header="@@ -1,2 +1,3 @@",
+                    lines=[" line1", "+line2_new", " line3"],
+                    old_start=1,
+                    new_start=1,
+                    old_lines=2,
+                    new_lines=3,
+                )
+            ],
+        )
+
+        issues = analyzer.review_file(file, docs_evidence=[])
+        self.assertEqual(len(issues), 0)
 
 
 if __name__ == "__main__":

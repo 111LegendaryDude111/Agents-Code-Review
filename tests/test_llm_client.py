@@ -3,6 +3,8 @@ import unittest
 from unittest.mock import patch
 
 from src.review.llm import (
+    DEFAULT_HUGGINGFACE_BASE_URL,
+    DEFAULT_HUGGINGFACE_MODEL,
     DEFAULT_OLLAMA_BASE_URL,
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_VLLM_BASE_URL,
@@ -12,6 +14,46 @@ from src.review.llm import (
 
 
 class TestLLMClient(unittest.TestCase):
+    @patch("src.review.llm.load_env_file", return_value=None)
+    @patch("src.review.llm.openai.OpenAI")
+    def test_huggingface_defaults(self, mock_openai_client, _mock_load_env):
+        with patch.dict(
+            os.environ,
+            {
+                "LLM_PROVIDER": "huggingface",
+                "HF_TOKEN": "hf_test_token",
+            },
+            clear=True,
+        ):
+            client = LLMClient()
+
+        mock_openai_client.assert_called_once_with(
+            api_key="hf_test_token",
+            base_url=DEFAULT_HUGGINGFACE_BASE_URL,
+        )
+        self.assertEqual(client.model, DEFAULT_HUGGINGFACE_MODEL)
+
+    @patch("src.review.llm.load_env_file", return_value=None)
+    @patch("src.review.llm.openai.OpenAI")
+    def test_hf_alias_uses_huggingface_env(self, mock_openai_client, _mock_load_env):
+        with patch.dict(
+            os.environ,
+            {
+                "LLM_PROVIDER": "hf",
+                "HUGGINGFACE_API_KEY": "hf_alias_token",
+                "HUGGINGFACE_BASE_URL": "https://router.huggingface.co/v1",
+                "HUGGINGFACE_MODEL": "Qwen/Qwen2.5-Coder-32B-Instruct",
+            },
+            clear=True,
+        ):
+            client = LLMClient()
+
+        mock_openai_client.assert_called_once_with(
+            api_key="hf_alias_token",
+            base_url="https://router.huggingface.co/v1",
+        )
+        self.assertEqual(client.model, "Qwen/Qwen2.5-Coder-32B-Instruct")
+
     @patch("src.review.llm.load_env_file", return_value=None)
     @patch("src.review.llm.openai.OpenAI")
     def test_vllm_defaults_to_qwen_and_local_url(

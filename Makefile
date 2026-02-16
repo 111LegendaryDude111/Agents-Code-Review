@@ -1,7 +1,9 @@
-.PHONY: setup setup-dev test lint format run run-full run-ollama run-ollama-full ollama-pull ollama-serve _run-dry clean
+.PHONY: setup setup-dev test lint format build-context run run-full run-hf run-hf-full run-ollama run-ollama-full ollama-pull ollama-serve _run-dry clean
 
 PYTHON := .venv/bin/python
 PIP := .venv/bin/pip
+HF_BASE_URL_DEFAULT := https://router.huggingface.co/v1
+HF_MODEL_DEFAULT := Qwen/Qwen2.5-Coder-32B-Instruct
 OLLAMA_BASE_URL_DEFAULT := http://127.0.0.1:11434/v1
 OLLAMA_MODEL_DEFAULT := qwen2.5-coder:7b
 
@@ -24,6 +26,14 @@ format:
 	$(PYTHON) -m ruff check --fix src tests
 	$(PYTHON) -m black src tests
 
+build-context:
+	@set -a; \
+	if [ -f .env ]; then . ./.env; fi; \
+	set +a; \
+	CONTEXT_PATH_VAL="$$PROJECT_CONTEXT_PATH"; \
+	if [ -z "$$CONTEXT_PATH_VAL" ]; then CONTEXT_PATH_VAL="project-context.json"; fi; \
+	$(PYTHON) -m src.main build-context --workspace-root "." --output "$$CONTEXT_PATH_VAL"
+
 clean:
 	rm -rf .venv
 	find . -type d -name "__pycache__" -exec rm -rf {} +
@@ -31,8 +41,11 @@ clean:
 
 # Example run command (dry-run by default)
 # Usage:
+#   make build-context
 #   make run
 #   make run-full
+#   make run-hf
+#   make run-hf-full
 #   make run-ollama
 #   make run-ollama-full
 #   make run REPO=owner/repo PR=123 TOKEN=ghp_... [KEY=...]
@@ -41,6 +54,18 @@ run: _run-dry
 
 run-full: DRY_RUN_OUTPUT=full
 run-full: _run-dry
+
+run-hf: DRY_RUN_OUTPUT=summary
+run-hf: LLM_PROVIDER_OVERRIDE=huggingface
+run-hf: LLM_MODEL_OVERRIDE=$(HF_MODEL_DEFAULT)
+run-hf: LLM_BASE_URL_OVERRIDE=$(HF_BASE_URL_DEFAULT)
+run-hf: _run-dry
+
+run-hf-full: DRY_RUN_OUTPUT=full
+run-hf-full: LLM_PROVIDER_OVERRIDE=huggingface
+run-hf-full: LLM_MODEL_OVERRIDE=$(HF_MODEL_DEFAULT)
+run-hf-full: LLM_BASE_URL_OVERRIDE=$(HF_BASE_URL_DEFAULT)
+run-hf-full: _run-dry
 
 run-ollama: DRY_RUN_OUTPUT=summary
 run-ollama: LLM_PROVIDER_OVERRIDE=ollama
@@ -90,10 +115,12 @@ _run-dry:
 	if [ -z "$$BASE_URL_VAL" ]; then BASE_URL_VAL="$$LLM_BASE_URL"; fi; \
 	if [ -z "$$KEY_VAL" ]; then \
 		case "$$PROVIDER_VAL" in \
+			huggingface|hf) KEY_VAL="$$HF_TOKEN"; [ -z "$$KEY_VAL" ] && KEY_VAL="$$HUGGINGFACE_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="$$OPENAI_API_KEY" ;; \
 			gemini) KEY_VAL="$$GEMINI_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="$$OPENAI_API_KEY" ;; \
 			openai) KEY_VAL="$$OPENAI_API_KEY" ;; \
 			ollama) KEY_VAL="$$OLLAMA_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="$$OPENAI_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="dummy" ;; \
-			*) KEY_VAL="$$GEMINI_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="$$OPENAI_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="$$OLLAMA_API_KEY" ;; \
+			vllm) KEY_VAL="$$VLLM_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="$$OPENAI_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="dummy" ;; \
+			*) KEY_VAL="$$HF_TOKEN"; [ -z "$$KEY_VAL" ] && KEY_VAL="$$HUGGINGFACE_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="$$GEMINI_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="$$OPENAI_API_KEY"; [ -z "$$KEY_VAL" ] && KEY_VAL="$$OLLAMA_API_KEY" ;; \
 		esac; \
 	fi; \
 	if [ -z "$$OUTPUT_MODE_VAL" ]; then OUTPUT_MODE_VAL="summary"; fi; \
@@ -101,9 +128,12 @@ _run-dry:
 	if [ -n "$$MODEL_VAL" ]; then export LLM_MODEL="$$MODEL_VAL"; fi; \
 	if [ -n "$$BASE_URL_VAL" ]; then export LLM_BASE_URL="$$BASE_URL_VAL"; fi; \
 	if [ -n "$$KEY_VAL" ]; then \
+		export HF_TOKEN="$$KEY_VAL"; \
+		export HUGGINGFACE_API_KEY="$$KEY_VAL"; \
 		export GEMINI_API_KEY="$$KEY_VAL"; \
 		export OPENAI_API_KEY="$$KEY_VAL"; \
 		export OLLAMA_API_KEY="$$KEY_VAL"; \
+		export VLLM_API_KEY="$$KEY_VAL"; \
 	fi; \
 	if [ -z "$$REPO_VAL" ] || [ -z "$$PR_VAL" ] || [ -z "$$TOKEN_VAL" ]; then \
 		echo "Error: missing required values (REPO, PR, TOKEN)."; \

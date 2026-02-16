@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_LINE_EXCERPT_MAX_CHARS = 200
 DEFAULT_EXCERPT_MAX_CHARS = 500
 DEFAULT_FALLBACK_HUNK_LINES = 5
+DEFAULT_PROJECT_CONTEXT_MAX_CHARS = 2200
 
 
 class ReviewAnalyzer:
@@ -91,6 +92,19 @@ class ReviewAnalyzer:
             return max(1, file.hunks[0].new_start)
         return 1
 
+    def _collect_known_new_lines(self, file: ChangedFile) -> set[int]:
+        known_lines: set[int] = set()
+        for hunk in file.hunks:
+            new_line = hunk.new_start
+            for raw_line in hunk.lines:
+                prefix = raw_line[:1] if raw_line else ""
+                if prefix in {"+", " "}:
+                    known_lines.add(max(1, new_line))
+                    new_line += 1
+                elif prefix == "-":
+                    continue
+        return known_lines
+
     def _resolve_line_range(
         self, file: ChangedFile, candidate: LLMIssueCandidate
     ) -> tuple[int, int]:
@@ -99,7 +113,13 @@ class ReviewAnalyzer:
         """
         default_line = self._find_default_line(file)
         raw_start = (
-            candidate.line_start if candidate.line_start is not None else default_line
+            candidate.line_start
+            if candidate.line_start is not None
+            else (
+                candidate.line_end
+                if candidate.line_end is not None
+                else default_line
+            )
         )
         raw_end = candidate.line_end if candidate.line_end is not None else raw_start
         line_start = max(1, int(raw_start))
@@ -162,7 +182,10 @@ class ReviewAnalyzer:
         )
 
     def triage(
-        self, filter_result: FilterResult, pr_meta: dict[str, Any]
+        self,
+        filter_result: FilterResult,
+        pr_meta: dict[str, Any],
+        project_context: str | None = None,
     ) -> dict[str, Any]:
         """
         Determine which files to review and set budget.
@@ -174,13 +197,24 @@ Output logic in JSON:
 {
   "files_to_review": ["path/to/file1", "path/to/file2"],
   "focus_areas": ["security", "performance", "logic"],
-  "budget": "high"
+  "budget": "high|normal|low",
+  "summary": "brief triage summary"
 }
+Language rules:
+- All human-readable text values must be in Russian (ru-RU).
+- Keep JSON keys and "budget" values exactly as specified above.
+- Keep file paths, code tokens, and identifiers unchanged.
 """
         files_summary = "\n".join(
             f"{f.path} (+{f.additions}/-{f.deletions})"
             for f in filter_result.files_to_review
         )
+
+        context_text = (project_context or "").strip()
+        if len(context_text) > DEFAULT_PROJECT_CONTEXT_MAX_CHARS:
+            context_text = (
+                f"{context_text[: DEFAULT_PROJECT_CONTEXT_MAX_CHARS - 3].rstrip()}..."
+            )
 
         user_prompt = f"""
 PR Title: {pr_meta.get('title')}
@@ -191,6 +225,8 @@ Risk Factors: {filter_result.risk_factors}
 Changed Files:
 {files_summary}
 """
+        if context_text:
+            user_prompt += f"\nProject Context:\n{context_text}\n"
         from ..safety.utils import SafeJSONParser
 
         try:
@@ -229,7 +265,10 @@ Changed Files:
             return {"files_to_review": [f.path for f in filter_result.files_to_review]}
 
     def review_file(
-        self, file: ChangedFile, docs_evidence: list[Evidence]
+        self,
+        file: ChangedFile,
+        docs_evidence: list[Evidence],
+        project_context: str | None = None,
     ) -> list[Issue]:
         """
         Review a single file using LLM with safety and reliability.
@@ -237,6 +276,22 @@ Changed Files:
         system_prompt = """You are a Senior Code Reviewer.
 Analyze the provided code diff and documentation evidence.
 Identify list of issues.
+Review policy (strict, low-noise):
+- Report only issues that are directly verifiable from the provided diff and evidence.
+- Every reported issue must point to a concrete diff line range (line_start/line_end) from the provided patch.
+- Do not report speculative issues that require unseen runtime context or assumptions.
+- Do not report style/naming/preferences unless they cause a real correctness, security, or performance impact.
+- If unsure, do not emit an issue.
+- Prefer fewer high-signal issues over long lists.
+- If no actionable defects are found, return an empty "issues" array.
+Severity guidance:
+- BLOCKER: proven correctness/security issue with high impact.
+- IMPORTANT: likely functional/performance defect with meaningful impact.
+- QUESTION/NIT: use sparingly, only when clearly actionable.
+- For BLOCKER/IMPORTANT include a concrete, minimal suggestion.
+Language rules:
+- Return all human-readable issue text in Russian (ru-RU): title, message, suggestion.
+- Keep JSON keys, enum values (severity/category), file paths, and code tokens unchanged.
 Output strictly JSON:
 {
   "issues": [
@@ -261,6 +316,12 @@ Output strictly JSON:
 
         evidence_text = "\n".join([f"[{e.source}]: {e.excerpt}" for e in docs_evidence])
 
+        context_text = (project_context or "").strip()
+        if len(context_text) > DEFAULT_PROJECT_CONTEXT_MAX_CHARS:
+            context_text = (
+                f"{context_text[: DEFAULT_PROJECT_CONTEXT_MAX_CHARS - 3].rstrip()}..."
+            )
+
         user_prompt = f"""
 File: {file.path}
 Additions: {file.additions}, Deletions: {file.deletions}
@@ -271,6 +332,8 @@ Relevant Generic Docs:
 Diff:
 {diff_content}
 """
+        if context_text:
+            user_prompt += f"\nProject Context:\n{context_text}\n"
         from ..safety.utils import SafeJSONParser, SecretRedactor
 
         redactor = SecretRedactor()
@@ -291,8 +354,8 @@ Diff:
             return []
 
         try:
+            cleaned = SafeJSONParser.clean_json_text(response)
             try:
-                cleaned = SafeJSONParser.clean_json_text(response)
                 review_response = FocusedReviewResponse.model_validate_json(cleaned)
                 issue_candidates = review_response.issues
             except ValidationError as validation_error:
@@ -325,8 +388,17 @@ Diff:
                             continue
 
             issues: list[Issue] = []
+            known_new_lines = self._collect_known_new_lines(file)
             for candidate in issue_candidates:
+                if candidate.line_start is None and candidate.line_end is None:
+                    continue
                 line_start, line_end = self._resolve_line_range(file, candidate)
+                if known_new_lines:
+                    overlaps_diff = any(
+                        line in known_new_lines for line in range(line_start, line_end + 1)
+                    )
+                    if not overlaps_diff:
+                        continue
                 evidence = self._build_issue_evidence(
                     file, docs_evidence, line_start, line_end
                 )
