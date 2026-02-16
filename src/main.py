@@ -52,7 +52,13 @@ def cli():
     help="Repository slug (owner/repo)",
 )
 @click.option("--pr", type=int, envvar="PR_NUMBER", help="Pull Request Number")
-@click.option("--openai-key", envvar="OPENAI_API_KEY", help="OpenAI API Key")
+@click.option(
+    "--llm-key",
+    "--openai-key",
+    "llm_key",
+    envvar=["HF_TOKEN", "HUGGINGFACE_API_KEY", "OPENAI_API_KEY"],
+    help="LLM API key override",
+)
 @click.option("--dry-run", is_flag=True, help="Do not post comments")
 @click.option(
     "--dry-run-output",
@@ -66,7 +72,7 @@ def review(
     token: str | None,
     repo: str | None,
     pr: int | None,
-    openai_key: str | None,
+    llm_key: str | None,
     dry_run: bool,
     dry_run_output: str,
 ) -> None:
@@ -128,7 +134,7 @@ def review(
     from .review.analyzer import ReviewAnalyzer
     from .review.llm import LLMClient
 
-    llm = LLMClient(api_key=openai_key)
+    llm = LLMClient(api_key=llm_key)
     analyzer = ReviewAnalyzer(llm)
 
     # Triage

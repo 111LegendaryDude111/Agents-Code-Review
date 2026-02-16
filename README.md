@@ -1,133 +1,19 @@
-# Система AI Code Review
+# AI Code Review
 
-## Обзор
-Это инструмент автоматизированного ревью кода, разработанный для запуска в CI/CD (GitHub Actions, GitLab CI). Он использует LLM для предоставления интеллектуальной обратной связи по Pull Requests, строго следуя подходу "Evidence-first" (доказательства прежде всего).
+This project is a lightweight AI reviewer for pull requests in CI/CD.
+It analyzes code diffs with an LLM, applies policy filters, and publishes concise review feedback to GitHub PRs.
 
-## Архитектура
+The tool is designed to be advisory (non-blocking): it highlights risks, prioritizes important issues, and keeps comments synchronized across runs to avoid noise.
 
-Система спроектирована как stateless CLI-инструмент, работающий внутри CI runner.
+## Default LLM Backend
 
-### Основные модули (`src/`)
+The default provider is Hugging Face Inference API (OpenAI-compatible endpoint).
 
-- **`domain.py`**: Определяет ключевые модели данных (`Issue`, `ReviewResult`, `ChangedFile`, `CommentPosition`). Обеспечивает строгую типизацию.
-- **`main.py`**: Точка входа CLI (оркестратор). Управляет аргументами и запускает конвейер ревью.
+## Hugging Face API Key
 
-### Компоненты
-
-1.  **Провайдеры (`src/providers/`)**
-    - Слой абстракции для Git-хостингов (GitHub, GitLab).
-    - **`github_provider.py`**: Отвечает за получение метаданных PR, парсинг diff'ов и **Upsert** комментариев (обновление существующего комментария бота вместо создания дублей).
-    - **Логика позиционирования**: Сопоставляет абстрактные issue с конкретными строками кода. Поддерживает "best-effort" публикацию (не падает при ошибках прав доступа).
-
-2.  **Фильтры (`src/filters/`)**
-    - **Предварительная фильтрация**: Исключает сгенерированные/vendor файлы (`package-lock.json`, `dist/`).
-    - **Оценка рисков (Risk Scoring)**: Эвристики для пометки рискованных изменений (например, `auth/`, `payment/`, `core/`).
-
-3.  **Логика ревью (`src/review/`)**
-    - **`analyzer.py`**: Интеллектуальное ядро.
-        - **Triage (Сортировка)**: Верхнеуровневый проход для определения плана ревью и бюджета.
-        - **Focused Review (Детальное ревью)**: Пофайловый анализ с использованием Diff + Docs Evidence.
-        - **Безопасность**: Использует `SafeJSONParser` для искушения ошибочного JSON от LLM и `SecretRedactor` для удаления секретов из промптов.
-    - **`llm.py`**: Клиент OpenAI API с повторными попытками (retries) и backoff.
-
-4.  **Retrieval (`src/retrieval/`)**
-    - **RAG**: Поиск релевантной документации (`CONTRIBUTING.md`, style guides) для обоснования замечаний правилами проекта.
-
-5.  **Политики (`src/policy/`)**
-    - **Manager**: Дедупликация issues и применение политик.
-    - **Gating**: Отбрасывание issues с низкой уверенностью (< 0.6) или **без доказательств (Evidence)**.
-    - **Решения**: Определяет статус `WARN` или `PASS`. **Никогда не блокирует (FAIL)** job, только предупреждает.
-
-6.  **Рендерер (`src/renderer/`)**
-    - Конвертирует результаты в Markdown и JSON (`result.json`).
-
-## Технический стек
-
-- **Язык**: Python 3.10+
-- **CLI**: `click` — для создания удобного интерфейса командной строки.
-- **Данные**: `pydantic` — для строгой валидации моделей данных и контрактов (Issues, Config).
-- **Git интеграция**: 
-  - `PyGithub` — взаимодействие с GitHub API.
-  - `python-gitlab` — взаимодействие с GitLab API (планируется).
-  - `gitpython` — работа с локальным git (опционально).
-- **AI/LLM**: 
-  - `openai` — клиент для доступа к моделям (GPT-4o/Turbo).
-  - `tenacity` — для надежности (retries, backoff) при сетевых вызовах.
-- **Утилиты**: 
-  - `rich` — красивое форматирование вывода в терминале.
-  - `pyyaml` — работа с конфигурационными файлами.
-
-## Использование
-
-### Требования
-- Python 3.10+
-- API key для выбранного LLM-провайдера (Gemini/OpenAI) или локальный Ollama
-- GitHub Token
-
-### Настройка окружения
-Создайте `.env` на основе шаблона и заполните значения:
-```bash
-cp .env.example .env
-```
-
-### Установка
-```bash
-make setup
-```
-
-### Установка dev-инструментов (линтер + форматтер)
-```bash
-make setup-dev
-```
-
-### Запуск локально (Gemini/OpenAI/Ollama)
-```bash
-make run
-```
-
-Полный вывод (summary + полный `result.json` в терминале):
-```bash
-make run-full
-```
-
-Переопределение значений при необходимости:
-```bash
-make run REPO=owner/repo PR=123 TOKEN=ghp_... KEY=...
-```
-
-### Локальный запуск через Ollama (Mac-friendly)
-
-1. Установи и запусти Ollama:
-```bash
-brew install ollama
-ollama serve
-```
-
-2. Загрузи модель:
-```bash
-make ollama-pull
-```
-
-3. Запусти ревью:
-```bash
-make run-ollama REPO=owner/repo PR=123 TOKEN=ghp_...
-```
-
-4. Полный вывод:
-```bash
-make run-ollama-full REPO=owner/repo PR=123 TOKEN=ghp_...
-```
-
-Подробности: `ollama/README.md`.
-
-### Статические проверки и автоформатирование
-```bash
-make lint
-make format
-```
-
-## Безопасность и Надежность
-- **Redaction**: Контент файлов сканируется на наличие секретов перед отправкой в LLM.
-- **JSON Validation**: Строгая валидация схем ответов LLM.
-- **Non-blocking**: Инструмент дает советы, но не ломает пайплайн (режим advisory).
-- **Artifacts**: Сохраняет `result.json` для аудита.
+1. Create or sign in to your Hugging Face account.
+2. Open `https://huggingface.co/settings/tokens`.
+3. Create a token (read or fine-grained) and enable permission: `Make calls to Inference Providers`.
+4. Configure the token:
+   - Local: set `HF_TOKEN=hf_...` in `.env`
+   - CI (GitHub Actions): add repository secret `HF_TOKEN`

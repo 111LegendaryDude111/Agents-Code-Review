@@ -22,9 +22,10 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
       GITHUB_REPOSITORY: ${{ github.repository }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
-      LLM_PROVIDER: gemini
-      LLM_MODEL: gemini-2.5-flash
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      LLM_PROVIDER: huggingface
+      LLM_MODEL: Qwen/Qwen2.5-Coder-32B-Instruct
+      LLM_BASE_URL: https://router.huggingface.co/v1
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
       AI_REVIEW_MAX_ISSUE_COMMENTS: "3"
       AI_REVIEW_MAX_SUMMARY_ITEMS: "20"
       AI_REVIEW_MAX_MESSAGE_CHARS: "220"
@@ -41,8 +42,8 @@ jobs:
 
       - name: Validate required secrets
         run: |
-          if [ -z "${GEMINI_API_KEY}" ]; then
-            echo "Missing secret: GEMINI_API_KEY"
+          if [ -z "${HF_TOKEN}" ]; then
+            echo "Missing secret: HF_TOKEN"
             exit 1
           fi
 

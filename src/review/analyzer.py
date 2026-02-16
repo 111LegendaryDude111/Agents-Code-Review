@@ -174,8 +174,13 @@ Output logic in JSON:
 {
   "files_to_review": ["path/to/file1", "path/to/file2"],
   "focus_areas": ["security", "performance", "logic"],
-  "budget": "high"
+  "budget": "high|normal|low",
+  "summary": "brief triage summary"
 }
+Language rules:
+- All human-readable text values must be in Russian (ru-RU).
+- Keep JSON keys and "budget" values exactly as specified above.
+- Keep file paths, code tokens, and identifiers unchanged.
 """
         files_summary = "\n".join(
             f"{f.path} (+{f.additions}/-{f.deletions})"
@@ -237,6 +242,9 @@ Changed Files:
         system_prompt = """You are a Senior Code Reviewer.
 Analyze the provided code diff and documentation evidence.
 Identify list of issues.
+Language rules:
+- Return all human-readable issue text in Russian (ru-RU): title, message, suggestion.
+- Keep JSON keys, enum values (severity/category), file paths, and code tokens unchanged.
 Output strictly JSON:
 {
   "issues": [
@@ -291,8 +299,8 @@ Diff:
             return []
 
         try:
+            cleaned = SafeJSONParser.clean_json_text(response)
             try:
-                cleaned = SafeJSONParser.clean_json_text(response)
                 review_response = FocusedReviewResponse.model_validate_json(cleaned)
                 issue_candidates = review_response.issues
             except ValidationError as validation_error:

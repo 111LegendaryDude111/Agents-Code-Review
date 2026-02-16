@@ -17,6 +17,8 @@ class SecretRedactor:
         # GitHub fine-grained/classic tokens.
         r"(github_pat_[A-Za-z0-9_]{82})",
         r"(gh[opusr]_[A-Za-z0-9]{36})",
+        # Hugging Face access tokens.
+        r"\b(hf_[A-Za-z0-9]{20,})\b",
         # OpenAI-style keys (sk-..., including project-prefixed forms).
         r"\b(sk-[A-Za-z0-9_-]{20,})\b",
         # Google/Gemini API keys.
