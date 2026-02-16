@@ -41,7 +41,6 @@ module.exports = async ({ github, context, core }) => {
   };
 
   const limits = {
-    maxIssueComments: toPositiveInt(process.env.AI_REVIEW_MAX_ISSUE_COMMENTS, 3),
     maxSummaryItems: toPositiveInt(process.env.AI_REVIEW_MAX_SUMMARY_ITEMS, 20),
     maxMessageChars: toPositiveInt(process.env.AI_REVIEW_MAX_MESSAGE_CHARS, 220),
     maxSuggestionChars: toPositiveInt(
@@ -49,20 +48,6 @@ module.exports = async ({ github, context, core }) => {
       160
     ),
   };
-
-  const parseSeveritySet = (raw, fallback) => {
-    const text = String(raw || "").trim();
-    const values = (text || fallback)
-      .split(",")
-      .map((item) => item.trim().toUpperCase())
-      .filter(Boolean);
-    return new Set(values);
-  };
-
-  const detailedSeveritySet = parseSeveritySet(
-    process.env.AI_REVIEW_DETAILED_SEVERITIES,
-    "BLOCKER,IMPORTANT"
-  );
 
   const severityOrder = {
     BLOCKER: 0,
@@ -87,9 +72,6 @@ module.exports = async ({ github, context, core }) => {
     typeof issue.confidence === "number" && Number.isFinite(issue.confidence)
       ? issue.confidence
       : -1;
-
-  const confidenceText = (issue) =>
-    confidenceValue(issue) >= 0 ? confidenceValue(issue).toFixed(2) : "n/a";
 
   const truncate = (value, maxChars) => {
     const text = String(value || "")
@@ -192,10 +174,13 @@ module.exports = async ({ github, context, core }) => {
     per_page: 100,
   });
 
-  const existingSummary = existingComments.find((c) =>
-    (c.body || "").includes(summaryMarker)
-  );
-  const previousKeys = parseKeysMarker(existingSummary ? existingSummary.body : "");
+  const summaryComments = existingComments
+    .filter((c) => (c.body || "").includes(summaryMarker))
+    .sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+  const previousSummary = summaryComments[0];
+  const previousKeys = parseKeysMarker(previousSummary ? previousSummary.body : "");
   const currentKeys = new Set(issueEntries.map((entry) => entry.key));
   const newKeys = issueEntries
     .filter((entry) => !previousKeys.has(entry.key))
@@ -234,7 +219,6 @@ module.exports = async ({ github, context, core }) => {
       : "**Issues**: 0";
     const deltaLine = `**Delta vs previous run**: +${newKeys.length} new | -${resolvedKeys.length} resolved | ${unchangedCount} unchanged`;
     const summaryText = summary || "No summary provided.";
-    const detailedPolicyLine = `**Detailed issue comments**: ${Array.from(detailedSeveritySet).join(", ")}`;
 
     const criticalNowSection = criticalNow.length
       ? [
@@ -270,7 +254,6 @@ module.exports = async ({ github, context, core }) => {
       statusLine,
       countLine,
       deltaLine,
-      detailedPolicyLine,
       "",
       summaryText,
       "",
@@ -285,103 +268,28 @@ module.exports = async ({ github, context, core }) => {
       .replace(/\n{3,}/g, "\n\n");
   };
 
-  const formatIssueBody = (entry, marker) => {
-    const issue = entry.issue;
-    const title = issue.title || "Issue";
-    const location = issueLocation(issue);
-    const message =
-      truncate(issue.message, limits.maxMessageChars) || "No details provided.";
-    const suggestion = truncate(issue.suggestion, limits.maxSuggestionChars);
-    const confidence = confidenceText(issue);
-
-    let body =
-      `${marker}\n` +
-      `### Ai review focus item\n\n` +
-      `**[${entry.severity}]** ${title}\n\n` +
-      `\`${location}\`\n\n` +
-      `${message}\n\n` +
-      `confidence: ${confidence}`;
-
-    if (suggestion) {
-      body += `\n\nSuggested fix: ${suggestion}`;
-    }
-
-    return body;
-  };
-
   const summaryBody = formatSummaryBody();
-  if (existingSummary) {
-    await github.rest.issues.updateComment({
-      owner,
-      repo,
-      comment_id: existingSummary.id,
-      body: summaryBody,
-    });
-  } else {
-    await github.rest.issues.createComment({
-      owner,
-      repo,
-      issue_number,
-      body: summaryBody,
-    });
-  }
-
-  const desiredByKey = new Map();
-  const detailedEntries = issueEntries.filter((entry) =>
-    detailedSeveritySet.has(entry.severity)
-  );
-  for (const entry of detailedEntries.slice(0, limits.maxIssueComments)) {
-    const key = entry.key;
-    const marker = `${issueMarkerPrefix}${key} -->`;
-    desiredByKey.set(key, formatIssueBody(entry, marker));
-  }
-
-  const existingIssueComments = existingComments.filter((c) =>
-    (c.body || "").includes(issueMarkerPrefix)
-  );
-  const seenKeys = new Set();
-
-  for (const comment of existingIssueComments) {
+  const managedComments = existingComments.filter((comment) => {
     const body = comment.body || "";
-    const match = body.match(/<!-- ai-review:item:([a-f0-9]+) -->/);
-    if (!match) {
-      continue;
-    }
-    const key = match[1];
-    seenKeys.add(key);
-    if (!desiredByKey.has(key)) {
-      await github.rest.issues.deleteComment({
-        owner,
-        repo,
-        comment_id: comment.id,
-      });
-      continue;
-    }
+    return body.includes(summaryMarker) || body.includes(issueMarkerPrefix);
+  });
 
-    const newBody = desiredByKey.get(key);
-    if (newBody && newBody !== body) {
-      await github.rest.issues.updateComment({
-        owner,
-        repo,
-        comment_id: comment.id,
-        body: newBody,
-      });
-    }
-  }
-
-  for (const [key, body] of desiredByKey) {
-    if (seenKeys.has(key)) {
-      continue;
-    }
-    await github.rest.issues.createComment({
+  for (const comment of managedComments) {
+    await github.rest.issues.deleteComment({
       owner,
       repo,
-      issue_number,
-      body,
+      comment_id: comment.id,
     });
   }
+
+  await github.rest.issues.createComment({
+    owner,
+    repo,
+    issue_number,
+    body: summaryBody,
+  });
 
   core.info(
-    `Published Ai review: total issues=${issueEntries.length}, detailed candidates=${detailedEntries.length}, detailed issue comments=${desiredByKey.size}.`
+    `Published Ai review: total issues=${issueEntries.length}, replaced comments=${managedComments.length}.`
   );
 };

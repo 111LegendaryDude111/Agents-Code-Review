@@ -27,8 +27,6 @@ jobs:
       LLM_BASE_URL: https://router.huggingface.co/v1
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       PROJECT_CONTEXT_PATH: project-context.json
-      AI_REVIEW_MAX_ISSUE_COMMENTS: "3"
-      AI_REVIEW_DETAILED_SEVERITIES: "BLOCKER,IMPORTANT"
       AI_REVIEW_MAX_SUMMARY_ITEMS: "20"
       AI_REVIEW_MAX_MESSAGE_CHARS: "220"
       AI_REVIEW_MAX_SUGGESTION_CHARS: "160"
