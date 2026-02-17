@@ -116,9 +116,7 @@ class ReviewAnalyzer:
             candidate.line_start
             if candidate.line_start is not None
             else (
-                candidate.line_end
-                if candidate.line_end is not None
-                else default_line
+                candidate.line_end if candidate.line_end is not None else default_line
             )
         )
         raw_end = candidate.line_end if candidate.line_end is not None else raw_start
@@ -395,7 +393,8 @@ Diff:
                 line_start, line_end = self._resolve_line_range(file, candidate)
                 if known_new_lines:
                     overlaps_diff = any(
-                        line in known_new_lines for line in range(line_start, line_end + 1)
+                        line in known_new_lines
+                        for line in range(line_start, line_end + 1)
                     )
                     if not overlaps_diff:
                         continue
